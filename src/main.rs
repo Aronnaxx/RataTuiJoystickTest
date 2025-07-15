@@ -32,6 +32,7 @@ struct App {
     gilrs: Gilrs,
     gamepads: HashMap<gilrs::GamepadId, GamepadState>,
     running: bool,
+    show_all_devices: bool, // Toggle to show all devices including inactive ones
 }
 
 impl App {
@@ -42,6 +43,7 @@ impl App {
             gilrs,
             gamepads: HashMap::new(),
             running: true,
+            show_all_devices: false,
         })
     }
 
@@ -89,32 +91,71 @@ impl App {
             ])
             .split(frame.area());
 
-        // Header with enhanced styling
-        let header_text = if self.gamepads.is_empty() {
-            "🎮 Gamepad Visualizer - Press 'q' to quit | No gamepads detected"
+        // Filter to only show active gamepads (with recent activity) unless showing all devices
+        let displayed_gamepads: Vec<_> = if self.show_all_devices {
+            // Show all connected gamepads
+            self.gamepads.iter().filter(|(_, gamepad)| gamepad.connected).collect()
         } else {
-            &format!("🎮 Gamepad Visualizer - Press 'q' to quit | {} gamepad(s) connected", self.gamepads.len())
+            // Show only active gamepads
+            self.gamepads.iter()
+                .filter(|(_, gamepad)| {
+                    // Show if connected and has recent activity (within last 30 seconds)
+                    gamepad.connected && 
+                    gamepad.last_activity
+                        .map(|last| last.elapsed() < Duration::from_secs(30))
+                        .unwrap_or(false) &&
+                    // Also check if it has any axis values (indicating it's a real controller)
+                    (!gamepad.axes.is_empty() || !gamepad.buttons.is_empty())
+                })
+                .collect()
+        };
+
+        // Header with enhanced styling
+        let header_text = if displayed_gamepads.is_empty() {
+            if self.show_all_devices {
+                "🎮 Gamepad Visualizer - Press 'q' to quit, 'd' to toggle debug | No gamepads detected"
+            } else {
+                "🎮 Gamepad Visualizer - Press 'q' to quit, 'd' to show all devices | No active gamepads"
+            }
+        } else {
+            if self.show_all_devices {
+                &format!("🎮 Gamepad Visualizer - Press 'q' to quit, 'd' to hide inactive | {} gamepad(s) [DEBUG MODE]", displayed_gamepads.len())
+            } else {
+                &format!("🎮 Gamepad Visualizer - Press 'q' to quit, 'd' to show all devices | {} active gamepad(s)", displayed_gamepads.len())
+            }
         };
         let header = Paragraph::new(header_text)
             .block(Block::default().borders(Borders::ALL))
             .style(Style::default().fg(Color::Cyan));
         frame.render_widget(header, chunks[0]);
 
-        if self.gamepads.is_empty() {
+        if displayed_gamepads.is_empty() {
+            let total_connected = self.gamepads.values().filter(|g| g.connected).count();
             let no_gamepad = Paragraph::new(vec![
                 Line::from(""),
-                Line::from(Span::styled("🕹️  No gamepads connected", Style::default().fg(Color::Yellow))),
+                Line::from(Span::styled("🕹️  No active gamepads detected", Style::default().fg(Color::Yellow))),
+                Line::from(""),
+                if total_connected > 0 && !self.show_all_devices {
+                    Line::from(format!("({} HID device(s) connected but inactive - press 'd' to show all)", total_connected))
+                } else if total_connected > 0 {
+                    Line::from(format!("({} device(s) connected)", total_connected))
+                } else {
+                    Line::from("No gamepads connected")
+                },
                 Line::from(""),
                 Line::from("Please connect a gamepad and try:"),
                 Line::from("• Moving the analog sticks"),
                 Line::from("• Pressing buttons"),
                 Line::from("• Using triggers or motion controls"),
                 Line::from(""),
-                Line::from(Span::styled("Supports all standard gamepad axes including:", Style::default().fg(Color::Gray))),
-                Line::from("• Left/Right sticks (X, Y)"),
-                Line::from("• Triggers (Z axes)"),
-                Line::from("• Motion sensors (Tx, Ty, Tz, Rx, Ry, Rz)"),
-                Line::from("• D-Pad and any custom axes"),
+                Line::from(Span::styled("Controls:", Style::default().fg(Color::Gray))),
+                Line::from("• 'd' - Toggle debug mode (show all devices)"),
+                Line::from("• 'q' - Quit application"),
+                if !self.show_all_devices {
+                    Line::from("• Only controllers with recent activity are shown")
+                } else {
+                    Line::from("• Debug mode: showing all connected devices")
+                },
             ])
                 .block(Block::default().borders(Borders::ALL).title("🎯 Status"))
                 .style(Style::default());
@@ -122,18 +163,18 @@ impl App {
             return;
         }
 
-        // Split the main area for multiple gamepads
+        // Split the main area for multiple displayed gamepads
         let gamepad_chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints(vec![Constraint::Min(0); self.gamepads.len()])
+            .constraints(vec![Constraint::Min(0); displayed_gamepads.len()])
             .split(chunks[1]);
 
-        for (i, (id, gamepad)) in self.gamepads.iter().enumerate() {
+        for (i, (id, gamepad)) in displayed_gamepads.iter().enumerate() {
             if i >= gamepad_chunks.len() {
                 break;
             }
 
-            self.draw_gamepad(frame, gamepad_chunks[i], *id, gamepad);
+            self.draw_gamepad(frame, gamepad_chunks[i], **id, gamepad);
         }
     }
 
@@ -149,8 +190,21 @@ impl App {
             ])
             .split(area);
 
-        // Title with gamepad info
-        let title = format!("🎮 {} ({}) 🎮", gamepad.name, status_text);
+        // Title with gamepad info and activity indicator
+        let activity_indicator = if let Some(last_activity) = gamepad.last_activity {
+            let seconds_ago = last_activity.elapsed().as_secs();
+            if seconds_ago < 5 {
+                "🟢 ACTIVE"
+            } else if seconds_ago < 15 {
+                "🟡 RECENT"
+            } else {
+                "🟠 IDLE"
+            }
+        } else {
+            "⚫ INACTIVE"
+        };
+        
+        let title = format!("🎮 {} ({}) {} 🎮", gamepad.name, status_text, activity_indicator);
         let title_widget = Paragraph::new(title)
             .style(Style::default().fg(status_color))
             .block(Block::default().borders(Borders::NONE));
@@ -606,6 +660,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => {
                         app.running = false;
+                    }
+                    KeyCode::Char('d') | KeyCode::Char('D') => {
+                        app.show_all_devices = !app.show_all_devices;
                     }
                     _ => {}
                 }
