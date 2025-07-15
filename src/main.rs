@@ -400,42 +400,57 @@ impl App {
         let gimbal_canvas = Canvas::default()
             .block(Block::default().borders(Borders::ALL).title("🎯 EPL Parallel Plate Gimbal"))
             .paint(|ctx| {
-                // Get joystick values for gimbal control
-                let pitch = gamepad.axes.get(&Axis::LeftStickY).copied().unwrap_or(0.0);  // Left stick Y -> Pitch (forward/back tilt)
-                let roll = gamepad.axes.get(&Axis::LeftStickX).copied().unwrap_or(0.0);   // Left stick X -> Roll (left/right tilt)
-                let yaw = gamepad.axes.get(&Axis::RightStickX).copied().unwrap_or(0.0);   // Right stick X -> Yaw (rotation)
+                // Get SpaceMouse/joystick values for gimbal control
+                let pitch = gamepad.axes.get(&Axis::LeftStickY).copied().unwrap_or(0.0);  // Tilt forward/back
+                let roll = gamepad.axes.get(&Axis::LeftStickX).copied().unwrap_or(0.0);   // Tilt left/right
+                
+                // Check for 3D SpaceMouse axes (Z-axis for up/down movement)
+                let z_lift = gamepad.axes.get(&Axis::LeftZ).copied()
+                    .or_else(|| gamepad.axes.get(&Axis::RightZ).copied())
+                    .unwrap_or(0.0);  // Up/down movement
+                
+                // Also check for any Tz axis (translation Z) from SpaceMouse
+                let z_translation = gamepad.axes.iter()
+                    .find(|(axis, _)| format!("{:?}", axis).contains("Tz"))
+                    .map(|(_, &value)| value)
+                    .unwrap_or(0.0);
+                
+                // Use the stronger Z signal
+                let z_movement = if z_translation.abs() > z_lift.abs() { z_translation } else { z_lift };
 
-                // Convert joystick values to tilt angles and heights
-                let pitch_angle = (pitch * 15.0) as f64;  // ±15 degrees max tilt
-                let roll_angle = (roll * 15.0) as f64;    // ±15 degrees max tilt
-                let yaw_rotation = (yaw as f64) * std::f64::consts::PI / 6.0; // ±30 degrees rotation
+                // Convert SpaceMouse values to realistic gimbal movement
+                let pitch_angle = (pitch * 20.0) as f64;  // ±20 degrees max tilt (realistic for gimbal)
+                let roll_angle = (roll * 20.0) as f64;    // ±20 degrees max tilt
+                let base_lift = (z_movement * 15.0) as f64;  // ±15mm vertical movement
 
-                // Platform dimensions
+                // Platform dimensions and base positions (FIXED - no rotation)
                 let platform_radius = 40.0;
                 let base_height = -20.0;
-                let nominal_height = 10.0;
+                let nominal_height = 10.0 + base_lift;  // Overall height adjustment
 
-                // Draw base platform (fixed lower plate)
+                // Draw base platform (fixed lower plate) - always stationary
                 let base_points = 8;
                 for i in 0..base_points {
                     let angle1 = i as f64 * 2.0 * std::f64::consts::PI / base_points as f64;
                     let angle2 = (i + 1) as f64 * 2.0 * std::f64::consts::PI / base_points as f64;
                     
                     let x1 = platform_radius * angle1.cos();
+                    let y1 = platform_radius * angle1.sin();
                     let x2 = platform_radius * angle2.cos();
+                    let y2 = platform_radius * angle2.sin();
                     
                     ctx.draw(&ratatui::widgets::canvas::Line {
-                        x1, y1: base_height, x2, y2: base_height,
+                        x1, y1, x2, y2,
                         color: Color::DarkGray,
                     });
                 }
 
-                // Calculate scissor lift heights at 6 positions around the platform
+                // Fixed scissor lift positions (NO rotation - these are physical mounts)
                 let scissor_positions: [(f64, f64); 6] = [
-                    (0.0, platform_radius),      // Front
+                    (0.0, platform_radius),      // Front (Y+)
                     (60.0, platform_radius),     // Front-right
                     (120.0, platform_radius),    // Back-right
-                    (180.0, platform_radius),    // Back
+                    (180.0, platform_radius),    // Back (Y-)
                     (240.0, platform_radius),    // Back-left
                     (300.0, platform_radius),    // Front-left
                 ];
@@ -445,70 +460,96 @@ impl App {
                 for (angle_deg, radius) in scissor_positions.iter() {
                     let angle_rad = angle_deg.to_radians();
                     
-                    // Calculate height based on pitch and roll
-                    let x_pos = radius * angle_rad.cos();
-                    let y_pos = radius * angle_rad.sin();
+                    // Fixed position on base (no rotation)
+                    let base_x = radius * angle_rad.cos();
+                    let base_y = radius * angle_rad.sin();
                     
-                    // Height varies based on position and tilt angles
-                    let pitch_effect = (y_pos / platform_radius) * pitch_angle;  // Forward/back tilt
-                    let roll_effect = (x_pos / platform_radius) * roll_angle;    // Left/right tilt
-                    let height = nominal_height + pitch_effect + roll_effect;
+                    // Calculate scissor extension based on desired tilt
+                    // Each scissor extends/retracts to achieve the plate angle
+                    let pitch_effect = (base_y / platform_radius) * pitch_angle.to_radians() * platform_radius;
+                    let roll_effect = (base_x / platform_radius) * roll_angle.to_radians() * platform_radius;
                     
-                    // Apply yaw rotation to position
-                    let rotated_x = x_pos * yaw_rotation.cos() - y_pos * yaw_rotation.sin();
-                    let rotated_y = x_pos * yaw_rotation.sin() + y_pos * yaw_rotation.cos();
+                    // Final height for this scissor lift
+                    let scissor_height = nominal_height + pitch_effect + roll_effect;
                     
-                    upper_plate_points.push((rotated_x, rotated_y, height));
+                    // Upper plate connection point (same X,Y as base for parallel linkage)
+                    upper_plate_points.push((base_x, base_y, scissor_height));
                     
-                    // Draw scissor lift (simplified as vertical line)
+                    // Draw scissor lift with realistic color coding
+                    let extension = scissor_height - nominal_height;
+                    let lift_color = if extension > 3.0 {
+                        Color::LightGreen  // Extended
+                    } else if extension < -3.0 {
+                        Color::LightRed    // Retracted
+                    } else {
+                        Color::Yellow      // Neutral
+                    };
+                    
                     ctx.draw(&ratatui::widgets::canvas::Line {
-                        x1: rotated_x,
+                        x1: base_x,
                         y1: base_height,
-                        x2: rotated_x,
-                        y2: height,
-                        color: if height > nominal_height + 2.0 {
-                            Color::LightGreen  // Extended
-                        } else if height < nominal_height - 2.0 {
-                            Color::LightRed    // Retracted
-                        } else {
-                            Color::Yellow      // Neutral
-                        },
+                        x2: base_x,
+                        y2: scissor_height,
+                        color: lift_color,
                     });
                     
-                    // Draw stepper motor housing at base
+                    // Draw stepper motor housing at base (fixed position)
                     ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: rotated_x,
+                        x: base_x,
                         y: base_height - 3.0,
                         radius: 2.0,
                         color: Color::Blue,
+                    });
+                    
+                    // Draw scissor mechanism (simplified)
+                    let mid_height = (base_height + scissor_height) / 2.0;
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: base_x,
+                        y: mid_height,
+                        radius: 1.0,
+                        color: Color::Gray,
                     });
                 }
 
                 // Draw upper platform (tilted based on scissor heights)
                 for i in 0..upper_plate_points.len() {
-                    let (x1, _y1, h1) = upper_plate_points[i];
-                    let (x2, _y2, h2) = upper_plate_points[(i + 1) % upper_plate_points.len()];
+                    let (x1, y1, h1) = upper_plate_points[i];
+                    let (x2, y2, h2) = upper_plate_points[(i + 1) % upper_plate_points.len()];
                     
-                    // Use average height for line drawing (simulating 3D perspective)
+                    // Draw upper plate edge using actual 3D coordinates
                     let avg_height = (h1 + h2) / 2.0;
-                    let brightness = ((avg_height - nominal_height + 10.0) / 20.0).clamp(0.0, 1.0);
+                    let brightness = ((avg_height - (nominal_height - 5.0)) / 15.0).clamp(0.0, 1.0);
                     
-                    let line_color = if brightness > 0.7 {
+                    let line_color = if brightness > 0.8 {
                         Color::White
-                    } else if brightness > 0.4 {
+                    } else if brightness > 0.5 {
                         Color::Gray
-                    } else {
+                    } else if brightness > 0.2 {
                         Color::DarkGray
+                    } else {
+                        Color::Black
                     };
                     
+                    // Draw the edge of the upper plate using actual coordinates
                     ctx.draw(&ratatui::widgets::canvas::Line {
-                        x1, y1: avg_height, x2, y2: avg_height,
+                        x1, y1: h1, x2, y2: h2,
                         color: line_color,
+                    });
+                    
+                    // Draw connection points where upper plate meets scissor lifts
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: x1,
+                        y: h1,
+                        radius: 1.5,
+                        color: Color::LightBlue,
                     });
                 }
 
                 // Draw center payload mount on upper plate
-                let center_height = nominal_height + (pitch_angle * 0.1) + (roll_angle * 0.1);
+                let center_height = nominal_height + 
+                    (pitch_angle.to_radians() * 0.0) +  // Center doesn't move much for small tilts
+                    (roll_angle.to_radians() * 0.0);
+                    
                 ctx.draw(&ratatui::widgets::canvas::Circle {
                     x: 0.0,
                     y: center_height,
@@ -516,44 +557,60 @@ impl App {
                     color: Color::LightCyan,
                 });
 
-                // Draw tilt indicator lines
+                // Draw tilt visualization lines on the upper plate
+                let tilt_line_length = platform_radius * 0.7;
+                
+                // Roll tilt line (left-right axis)
+                let roll_tilt_height = roll_angle.to_radians() * tilt_line_length * 0.5;
                 ctx.draw(&ratatui::widgets::canvas::Line {
-                    x1: -platform_radius * 0.8,
-                    y1: center_height,
-                    x2: platform_radius * 0.8,
-                    y2: center_height + roll_angle * 0.5,
+                    x1: -tilt_line_length,
+                    y1: center_height - roll_tilt_height,
+                    x2: tilt_line_length,
+                    y2: center_height + roll_tilt_height,
                     color: Color::Magenta,
                 });
+                
+                // Pitch tilt line (forward-back axis)
+                let pitch_tilt_height = pitch_angle.to_radians() * tilt_line_length * 0.5;
                 ctx.draw(&ratatui::widgets::canvas::Line {
-                    x1: 0.0,
-                    y1: center_height - platform_radius * 0.8,
-                    x2: pitch_angle * 0.5,
-                    y2: center_height + platform_radius * 0.8,
+                    x1: 0.0 - pitch_tilt_height,
+                    y1: center_height - tilt_line_length,
+                    x2: 0.0 + pitch_tilt_height,
+                    y2: center_height + tilt_line_length,
                     color: Color::Cyan,
                 });
 
-                // Draw axis indicators and labels
+                // Draw coordinate system reference (fixed to world, not gimbal)
                 ctx.draw(&ratatui::widgets::canvas::Line {
-                    x1: -60.0, y1: -40.0, x2: -45.0, y2: -40.0,
+                    x1: -70.0, y1: -40.0, x2: -55.0, y2: -40.0,
                     color: Color::Red,  // X-axis (Roll)
                 });
                 ctx.draw(&ratatui::widgets::canvas::Line {
-                    x1: -60.0, y1: -40.0, x2: -60.0, y2: -25.0,
+                    x1: -70.0, y1: -40.0, x2: -70.0, y2: -25.0,
                     color: Color::Green,  // Y-axis (Pitch)
                 });
                 ctx.draw(&ratatui::widgets::canvas::Line {
-                    x1: -60.0, y1: -40.0, x2: -50.0, y2: -30.0,
+                    x1: -70.0, y1: -40.0, x2: -60.0, y2: -30.0,
                     color: Color::Blue,  // Z-axis (Height)
                 });
 
-                // Show current tilt values as position indicators
+                // Status indicators
                 let tilt_magnitude = (pitch_angle.powi(2) + roll_angle.powi(2)).sqrt();
-                if tilt_magnitude > 1.0 {
+                if tilt_magnitude > 2.0 {
                     ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: 50.0,
-                        y: 30.0,
+                        x: 55.0,
+                        y: 35.0,
                         radius: 3.0,
                         color: Color::Red,
+                    });
+                }
+                
+                if base_lift.abs() > 2.0 {
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: 55.0,
+                        y: 25.0,
+                        radius: 3.0,
+                        color: if base_lift > 0.0 { Color::LightGreen } else { Color::LightRed },
                     });
                 }
             })
@@ -608,11 +665,20 @@ impl App {
         // Add gimbal angle information first
         let left_x = gamepad.axes.get(&Axis::LeftStickX).copied().unwrap_or(0.0);
         let left_y = gamepad.axes.get(&Axis::LeftStickY).copied().unwrap_or(0.0);
-        let right_x = gamepad.axes.get(&Axis::RightStickX).copied().unwrap_or(0.0);
+        let z_lift = gamepad.axes.get(&Axis::LeftZ).copied()
+            .or_else(|| gamepad.axes.get(&Axis::RightZ).copied())
+            .unwrap_or(0.0);
         
-        axis_display.push(("🎯 Plate Roll".to_string(), left_x, Color::LightRed));
-        axis_display.push(("🎯 Plate Pitch".to_string(), left_y, Color::Yellow));
-        axis_display.push(("🎯 Plate Yaw".to_string(), right_x, Color::Cyan));
+        // Check for SpaceMouse Z translation
+        let z_translation = gamepad.axes.iter()
+            .find(|(axis, _)| format!("{:?}", axis).contains("Tz"))
+            .map(|(_, &value)| value)
+            .unwrap_or(0.0);
+        let z_movement = if z_translation.abs() > z_lift.abs() { z_translation } else { z_lift };
+        
+        axis_display.push(("🎯 Gimbal Roll".to_string(), left_x, Color::LightRed));
+        axis_display.push(("🎯 Gimbal Pitch".to_string(), left_y, Color::Yellow));
+        axis_display.push(("🎯 Gimbal Height".to_string(), z_movement, Color::LightGreen));
         
         // Add known axes with nice names and colors
         for (_category, axes) in all_possible_axes {
