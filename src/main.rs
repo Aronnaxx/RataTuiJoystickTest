@@ -89,16 +89,35 @@ impl App {
             ])
             .split(frame.area());
 
-        // Header
-        let header = Paragraph::new("🎮 Gamepad Visualizer - Press 'q' to quit")
+        // Header with enhanced styling
+        let header_text = if self.gamepads.is_empty() {
+            "🎮 Gamepad Visualizer - Press 'q' to quit | No gamepads detected"
+        } else {
+            &format!("🎮 Gamepad Visualizer - Press 'q' to quit | {} gamepad(s) connected", self.gamepads.len())
+        };
+        let header = Paragraph::new(header_text)
             .block(Block::default().borders(Borders::ALL))
             .style(Style::default().fg(Color::Cyan));
         frame.render_widget(header, chunks[0]);
 
         if self.gamepads.is_empty() {
-            let no_gamepad = Paragraph::new("No gamepads connected. Please connect a gamepad and try moving the sticks or pressing buttons.")
-                .block(Block::default().borders(Borders::ALL).title("Status"))
-                .style(Style::default().fg(Color::Yellow));
+            let no_gamepad = Paragraph::new(vec![
+                Line::from(""),
+                Line::from(Span::styled("🕹️  No gamepads connected", Style::default().fg(Color::Yellow))),
+                Line::from(""),
+                Line::from("Please connect a gamepad and try:"),
+                Line::from("• Moving the analog sticks"),
+                Line::from("• Pressing buttons"),
+                Line::from("• Using triggers or motion controls"),
+                Line::from(""),
+                Line::from(Span::styled("Supports all standard gamepad axes including:", Style::default().fg(Color::Gray))),
+                Line::from("• Left/Right sticks (X, Y)"),
+                Line::from("• Triggers (Z axes)"),
+                Line::from("• Motion sensors (Tx, Ty, Tz, Rx, Ry, Rz)"),
+                Line::from("• D-Pad and any custom axes"),
+            ])
+                .block(Block::default().borders(Borders::ALL).title("🎯 Status"))
+                .style(Style::default());
             frame.render_widget(no_gamepad, chunks[1]);
             return;
         }
@@ -257,31 +276,8 @@ impl App {
 
         // Translation sensors (Tx, Ty, Tz)
         let translation_canvas = Canvas::default()
-            .block(Block::default().borders(Borders::ALL).title("📍 Translation (T)"))
+            .block(Block::default().borders(Borders::ALL).title("📍 Motion Sensors"))
             .paint(|ctx| {
-                let tx = gamepad.axes.get(&Axis::Unknown).copied().unwrap_or(0.0); // These might map differently
-                let ty = gamepad.axes.get(&Axis::Unknown).copied().unwrap_or(0.0);
-                let tz = gamepad.axes.get(&Axis::Unknown).copied().unwrap_or(0.0);
-
-                // Try to find Tx, Ty, Tz by checking all axes
-                let mut tx_val = 0.0;
-                let mut ty_val = 0.0;
-                let mut tz_val = 0.0;
-
-                // Since we can't directly access Tx, Ty, Tz enum variants, we'll display all unknown axes
-                for (axis, value) in &gamepad.axes {
-                    match axis {
-                        Axis::LeftStickX | Axis::LeftStickY | Axis::RightStickX | Axis::RightStickY | 
-                        Axis::LeftZ | Axis::RightZ | Axis::DPadX | Axis::DPadY => {
-                            // Skip known stick and trigger axes
-                        }
-                        _ => {
-                            // This could be Tx, Ty, Tz, Rx, Ry, Rz
-                            // We'll draw a 3D representation
-                        }
-                    }
-                }
-
                 // Draw 3D coordinate system
                 ctx.draw(&ratatui::widgets::canvas::Line {
                     x1: 0.0, y1: 0.0, x2: 30.0, y2: 0.0, color: Color::Red,  // X axis
@@ -293,13 +289,32 @@ impl App {
                     x1: 0.0, y1: 0.0, x2: -15.0, y2: -15.0, color: Color::Blue,  // Z axis (perspective)
                 });
 
-                // Draw position indicator
-                ctx.draw(&ratatui::widgets::canvas::Circle {
-                    x: tx_val as f64 * 25.0,
-                    y: ty_val as f64 * 25.0,
-                    radius: 3.0,
-                    color: Color::Yellow,
-                });
+                // Find and display any motion sensor values
+                let mut motion_detected = false;
+                for (axis, &value) in &gamepad.axes {
+                    let axis_name = format!("{:?}", axis);
+                    // Look for motion sensor axes (not standard gamepad axes)
+                    if !matches!(axis, Axis::LeftStickX | Axis::LeftStickY | Axis::RightStickX | 
+                                      Axis::RightStickY | Axis::LeftZ | Axis::RightZ | 
+                                      Axis::DPadX | Axis::DPadY) {
+                        // Draw motion indicator
+                        let x_pos = (value * 25.0).clamp(-35.0, 35.0);
+                        ctx.draw(&ratatui::widgets::canvas::Circle {
+                            x: x_pos as f64,
+                            y: 0.0,
+                            radius: 3.0,
+                            color: if axis_name.contains('T') { Color::Yellow } else { Color::Magenta },
+                        });
+                        motion_detected = true;
+                    }
+                }
+
+                if !motion_detected {
+                    // Show a neutral indicator
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: 0.0, y: 0.0, radius: 2.0, color: Color::DarkGray,
+                    });
+                }
             })
             .x_bounds([-40.0, 40.0])
             .y_bounds([-40.0, 40.0]);
@@ -371,7 +386,7 @@ impl App {
         let mut axis_display: Vec<(String, f32, Color)> = Vec::new();
         
         // Add known axes with nice names and colors
-        for (category, axes) in all_possible_axes {
+        for (_category, axes) in all_possible_axes {
             for axis in axes {
                 if let Some(&value) = gamepad.axes.get(&axis) {
                     let color = match axis {
