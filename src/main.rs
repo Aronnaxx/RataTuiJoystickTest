@@ -131,35 +131,43 @@ impl App {
 
         if displayed_gamepads.is_empty() {
             let total_connected = self.gamepads.values().filter(|g| g.connected).count();
+            
+            // Create a dormant gamepad state for visualization
+            let dormant_gamepad = GamepadState {
+                name: "No Active Controller - Demo Mode".to_string(),
+                connected: false,
+                axes: HashMap::new(),
+                buttons: HashMap::new(),
+                last_activity: None,
+            };
+            
+            // Show status message in header area
             let no_gamepad = Paragraph::new(vec![
-                Line::from(""),
-                Line::from(Span::styled("🕹️  No active gamepads detected", Style::default().fg(Color::Yellow))),
-                Line::from(""),
+                Line::from(Span::styled("🕹️  Demo Mode - No active controllers", Style::default().fg(Color::Yellow))),
                 if total_connected > 0 && !self.show_all_devices {
                     Line::from(format!("({} HID device(s) connected but inactive - press 'd' to show all)", total_connected))
                 } else if total_connected > 0 {
                     Line::from(format!("({} device(s) connected)", total_connected))
                 } else {
-                    Line::from("No gamepads connected")
-                },
-                Line::from(""),
-                Line::from("Please connect a gamepad and try:"),
-                Line::from("• Moving the analog sticks"),
-                Line::from("• Pressing buttons"),
-                Line::from("• Using triggers or motion controls"),
-                Line::from(""),
-                Line::from(Span::styled("Controls:", Style::default().fg(Color::Gray))),
-                Line::from("• 'd' - Toggle debug mode (show all devices)"),
-                Line::from("• 'q' - Quit application"),
-                if !self.show_all_devices {
-                    Line::from("• Only controllers with recent activity are shown")
-                } else {
-                    Line::from("• Debug mode: showing all connected devices")
+                    Line::from("Connect a gamepad or SpaceMouse to control the gimbal")
                 },
             ])
                 .block(Block::default().borders(Borders::ALL).title("🎯 Status"))
                 .style(Style::default());
-            frame.render_widget(no_gamepad, chunks[1]);
+            
+            // Use a smaller area for the status message
+            let demo_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(5),    // Status message
+                    Constraint::Min(0),       // Gimbal visualization
+                ])
+                .split(chunks[1]);
+                
+            frame.render_widget(no_gamepad, demo_chunks[0]);
+            
+            // Draw the gimbal in demo/dormant state
+            self.draw_gamepad(frame, demo_chunks[1], &dormant_gamepad);
             return;
         }
 
@@ -169,18 +177,21 @@ impl App {
             .constraints(vec![Constraint::Min(0); displayed_gamepads.len()])
             .split(chunks[1]);
 
-        for (i, (id, gamepad)) in displayed_gamepads.iter().enumerate() {
+        for (i, (_id, gamepad)) in displayed_gamepads.iter().enumerate() {
             if i >= gamepad_chunks.len() {
                 break;
             }
 
-            self.draw_gamepad(frame, gamepad_chunks[i], **id, gamepad);
+            self.draw_gamepad(frame, gamepad_chunks[i], gamepad);
         }
     }
 
-    fn draw_gamepad(&self, frame: &mut Frame, area: Rect, _id: gilrs::GamepadId, gamepad: &GamepadState) {
-        let status_color = if gamepad.connected { Color::Green } else { Color::Red };
-        let status_text = if gamepad.connected { "Connected" } else { "Disconnected" };
+    fn draw_gamepad(&self, frame: &mut Frame, area: Rect, gamepad: &GamepadState) {
+        let (status_color, status_text, title_suffix) = if gamepad.connected { 
+            (Color::Green, "Connected", "")
+        } else { 
+            (Color::Yellow, "Demo Mode", " - Neutral Position")
+        };
 
         let main_chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -200,11 +211,13 @@ impl App {
             } else {
                 "🟠 IDLE"
             }
-        } else {
+        } else if gamepad.connected {
             "⚫ INACTIVE"
+        } else {
+            "⚪ DEMO"
         };
         
-        let title = format!("🎮 {} ({}) {} 🎮", gamepad.name, status_text, activity_indicator);
+        let title = format!("🎮 {} ({}) {}{} 🎮", gamepad.name, status_text, activity_indicator, title_suffix);
         let title_widget = Paragraph::new(title)
             .style(Style::default().fg(status_color))
             .block(Block::default().borders(Borders::NONE));
@@ -212,7 +225,7 @@ impl App {
 
         // Full-screen EPL Gimbal Visualization (Maximum Resolution)
         let gimbal_canvas = Canvas::default()
-            .block(Block::default().borders(Borders::ALL).title("🎯 EPL Parallel Plate Gimbal - High Resolution"))
+            .block(Block::default().borders(Borders::ALL).title("🎯 EPL Parallel Plate Gimbal - Isometric View (3 Scissor Lifts)"))
             .paint(|ctx| {
                 // Get SpaceMouse/joystick values for gimbal control
                 let pitch = gamepad.axes.get(&Axis::LeftStickY).copied().unwrap_or(0.0);  // Tilt forward/back
@@ -242,16 +255,27 @@ impl App {
                 let base_height = -60.0;
                 let nominal_height = 30.0 + base_lift;  // Overall height adjustment
 
-                // Draw base platform (fixed lower plate) - always stationary - Higher detail
+                // Isometric projection helper function
+                let to_isometric = |x: f64, y: f64, z: f64| -> (f64, f64) {
+                    // Standard isometric projection matrix
+                    let iso_x = (x - z) * 0.866;  // cos(30°) ≈ 0.866
+                    let iso_y = (x + z) * 0.5 + y;  // sin(30°) = 0.5
+                    (iso_x, iso_y)
+                };
+
+                // Draw base platform (fixed lower plate) in isometric view - triangular support structure
                 let base_points = 24;  // Much more segments for ultra-smooth circle
                 for i in 0..base_points {
                     let angle1 = i as f64 * 2.0 * std::f64::consts::PI / base_points as f64;
                     let angle2 = (i + 1) as f64 * 2.0 * std::f64::consts::PI / base_points as f64;
                     
-                    let x1 = platform_radius * angle1.cos();
-                    let y1 = platform_radius * angle1.sin();
-                    let x2 = platform_radius * angle2.cos();
-                    let y2 = platform_radius * angle2.sin();
+                    let x1_3d = platform_radius * angle1.cos();
+                    let y1_3d = platform_radius * angle1.sin();
+                    let x2_3d = platform_radius * angle2.cos();
+                    let y2_3d = platform_radius * angle2.sin();
+                    
+                    let (x1, y1) = to_isometric(x1_3d, base_height, y1_3d);
+                    let (x2, y2) = to_isometric(x2_3d, base_height, y2_3d);
                     
                     ctx.draw(&ratatui::widgets::canvas::Line {
                         x1, y1, x2, y2,
@@ -259,56 +283,94 @@ impl App {
                     });
                 }
 
-                // Draw multiple inner reference circles for scale
-                for ring in 1..4 {
-                    let ring_points = 16;
-                    let ring_radius = platform_radius * (ring as f64 * 0.25);
-                    for i in 0..ring_points {
-                        let angle1 = i as f64 * 2.0 * std::f64::consts::PI / ring_points as f64;
-                        let angle2 = (i + 1) as f64 * 2.0 * std::f64::consts::PI / ring_points as f64;
-                        
-                        let x1 = ring_radius * angle1.cos();
-                        let x2 = ring_radius * angle2.cos();
-                        
+                // Draw triangular support structure connecting the three scissor lift positions
+                for i in 0..3 {
+                    let angle1 = (i * 120) as f64;
+                    let angle2 = ((i + 1) * 120) as f64;
+                    
+                    let x1_3d = platform_radius * 0.8 * angle1.to_radians().cos();
+                    let y1_3d = platform_radius * 0.8 * angle1.to_radians().sin();
+                    let x2_3d = platform_radius * 0.8 * angle2.to_radians().cos();
+                    let y2_3d = platform_radius * 0.8 * angle2.to_radians().sin();
+                    
+                    let (x1, y1) = to_isometric(x1_3d, base_height, y1_3d);
+                    let (x2, y2) = to_isometric(x2_3d, base_height, y2_3d);
+                    
+                    // Draw thick triangular base structure
+                    for thickness in [-2.0, -1.0, 0.0, 1.0, 2.0] {
                         ctx.draw(&ratatui::widgets::canvas::Line {
-                            x1, y1: base_height, x2, y2: base_height,
-                            color: if ring == 3 { Color::Gray } else { Color::DarkGray },
+                            x1: x1 + thickness,
+                            y1,
+                            x2: x2 + thickness,
+                            y2,
+                            color: Color::Gray,
                         });
                     }
                 }
 
-                // Fixed scissor lift positions (NO rotation - these are physical mounts)
-                let scissor_positions: [(f64, f64); 6] = [
-                    (0.0, platform_radius),      // Front (Y+)
-                    (60.0, platform_radius),     // Front-right
-                    (120.0, platform_radius),    // Back-right
-                    (180.0, platform_radius),    // Back (Y-)
-                    (240.0, platform_radius),    // Back-left
-                    (300.0, platform_radius),    // Front-left
+                // Draw center hub in isometric
+                let center_points = 12;
+                let hub_radius = platform_radius * 0.3;
+                for i in 0..center_points {
+                    let angle1 = i as f64 * 2.0 * std::f64::consts::PI / center_points as f64;
+                    let angle2 = (i + 1) as f64 * 2.0 * std::f64::consts::PI / center_points as f64;
+                    
+                    let x1_3d = hub_radius * angle1.cos();
+                    let y1_3d = hub_radius * angle1.sin();
+                    let x2_3d = hub_radius * angle2.cos();
+                    let y2_3d = hub_radius * angle2.sin();
+                    
+                    let (x1, y1) = to_isometric(x1_3d, base_height, y1_3d);
+                    let (x2, y2) = to_isometric(x2_3d, base_height, y2_3d);
+                    
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1, y1, x2, y2,
+                        color: Color::Gray,
+                    });
+                }
+
+                // EPL Gimbal: Three scissor lifts in triangular configuration (120° apart)
+                let scissor_positions: [(f64, f64); 3] = [
+                    (0.0, platform_radius * 0.8),     // Front (0°)
+                    (120.0, platform_radius * 0.8),   // Back-right (120°)
+                    (240.0, platform_radius * 0.8),   // Back-left (240°)
                 ];
 
                 let mut upper_plate_points = Vec::new();
 
+                // Isometric projection helper function
+                let to_isometric = |x: f64, y: f64, z: f64| -> (f64, f64) {
+                    // Standard isometric projection matrix
+                    let iso_x = (x - z) * 0.866;  // cos(30°) ≈ 0.866
+                    let iso_y = (x + z) * 0.5 + y;  // sin(30°) = 0.5
+                    (iso_x, iso_y)
+                };
+
                 for (angle_deg, radius) in scissor_positions.iter() {
                     let angle_rad = angle_deg.to_radians();
                     
-                    // Fixed position on base (no rotation)
-                    let base_x = radius * angle_rad.cos();
-                    let base_y = radius * angle_rad.sin();
+                    // 3D position on base (no rotation)
+                    let base_x_3d = radius * angle_rad.cos();
+                    let base_y_3d = radius * angle_rad.sin();
+                    let base_z_3d = base_height;
+                    
+                    // Convert to isometric view
+                    let _base_iso = to_isometric(base_x_3d, base_z_3d, base_y_3d);
                     
                     // Calculate scissor extension based on desired tilt
                     // Each scissor extends/retracts to achieve the plate angle
-                    let pitch_effect = (base_y / platform_radius) * pitch_angle.to_radians() * platform_radius;
-                    let roll_effect = (base_x / platform_radius) * roll_angle.to_radians() * platform_radius;
+                    let pitch_effect = (base_y_3d / platform_radius) * pitch_angle.to_radians() * platform_radius;
+                    let roll_effect = (base_x_3d / platform_radius) * roll_angle.to_radians() * platform_radius;
                     
                     // Final height for this scissor lift
-                    let scissor_height = nominal_height + pitch_effect + roll_effect;
+                    let scissor_height_3d = nominal_height + pitch_effect + roll_effect;
                     
                     // Upper plate connection point (same X,Y as base for parallel linkage)
-                    upper_plate_points.push((base_x, base_y, scissor_height));
+                    let (upper_x, upper_y) = to_isometric(base_x_3d, scissor_height_3d, base_y_3d);
+                    upper_plate_points.push((upper_x, upper_y, scissor_height_3d));
                     
-                    // Draw enhanced scissor lift mechanism - More realistic based on photos
-                    let extension = scissor_height - nominal_height;
+                    // Draw enhanced X-pattern scissor lift mechanism
+                    let extension = scissor_height_3d - nominal_height;
                     let lift_color = if extension > 6.0 {
                         Color::LightGreen  // Extended
                     } else if extension < -6.0 {
@@ -317,92 +379,103 @@ impl App {
                         Color::Yellow      // Neutral
                     };
                     
-                    // Draw main scissor lift structure - thicker for high resolution
-                    for offset in [-1.0, 0.0, 1.0] {
+                    // Draw X-pattern scissor mechanism (EPL style)
+                    let scissor_width = 20.0;  // Width of the X pattern
+                    let mid_height_3d = (base_height + scissor_height_3d) / 2.0;
+                    let (mid_x, mid_y) = to_isometric(base_x_3d, mid_height_3d, base_y_3d);
+                    
+                    // Calculate X-pattern endpoints for isometric view
+                    let x_offset = scissor_width * 0.5;
+                    let (left_base_x, left_base_y) = to_isometric(base_x_3d - x_offset, base_height, base_y_3d);
+                    let (right_base_x, right_base_y) = to_isometric(base_x_3d + x_offset, base_height, base_y_3d);
+                    let (left_top_x, left_top_y) = to_isometric(base_x_3d - x_offset, scissor_height_3d, base_y_3d);
+                    let (right_top_x, right_top_y) = to_isometric(base_x_3d + x_offset, scissor_height_3d, base_y_3d);
+                    
+                    // Draw the X-pattern scissor lifts (thick lines for visibility)
+                    for thickness in [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5] {
+                        // Left diagonal of X
                         ctx.draw(&ratatui::widgets::canvas::Line {
-                            x1: base_x + offset,
-                            y1: base_height,
-                            x2: base_x + offset,
-                            y2: scissor_height,
+                            x1: left_base_x + thickness,
+                            y1: left_base_y,
+                            x2: right_top_x + thickness,
+                            y2: right_top_y,
+                            color: lift_color,
+                        });
+                        
+                        // Right diagonal of X
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: right_base_x + thickness,
+                            y1: right_base_y,
+                            x2: left_top_x + thickness,
+                            y2: left_top_y,
                             color: lift_color,
                         });
                     }
                     
-                    // Draw stepper motor housing at base (much larger for visibility)
+                    // Draw center pivot point of X
                     ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: base_x,
-                        y: base_height - 8.0,
-                        radius: 6.0,
+                        x: mid_x,
+                        y: mid_y,
+                        radius: 4.0,
+                        color: Color::White,
+                    });
+                    
+                    // Draw stepper motor housing at base (isometric view)
+                    let (motor_x, motor_y) = to_isometric(base_x_3d, base_height - 10.0, base_y_3d);
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: motor_x,
+                        y: motor_y,
+                        radius: 8.0,
                         color: Color::Blue,
                     });
                     
-                    // Draw motor mounting bracket
+                    // Draw motor mounting bracket in isometric
+                    let (bracket_left_x, bracket_left_y) = to_isometric(base_x_3d - 6.0, base_height - 10.0, base_y_3d);
+                    let (bracket_right_x, bracket_right_y) = to_isometric(base_x_3d + 6.0, base_height - 10.0, base_y_3d);
                     ctx.draw(&ratatui::widgets::canvas::Line {
-                        x1: base_x - 4.0,
-                        y1: base_height - 8.0,
-                        x2: base_x + 4.0,
-                        y2: base_height - 8.0,
+                        x1: bracket_left_x,
+                        y1: bracket_left_y,
+                        x2: bracket_right_x,
+                        y2: bracket_right_y,
                         color: Color::DarkGray,
                     });
                     
-                    // Draw realistic scissor mechanism with multiple joints
-                    let num_joints = 5;  // More joints for realistic mechanism
-                    for j in 1..num_joints {
-                        let joint_height = base_height + (scissor_height - base_height) * j as f64 / num_joints as f64;
-                        
-                        // Draw joint circles
-                        ctx.draw(&ratatui::widgets::canvas::Circle {
-                            x: base_x,
-                            y: joint_height,
-                            radius: 2.5,
-                            color: Color::Gray,
-                        });
-                        
-                        // Draw joint pins
-                        ctx.draw(&ratatui::widgets::canvas::Circle {
-                            x: base_x,
-                            y: joint_height,
-                            radius: 1.0,
-                            color: Color::White,
-                        });
-                    }
-                    
-                    // Draw scissor cross-bracing - more detailed like in the photos
-                    let support_offset = 4.0;  // Larger offset for better visibility
-                    let mid_height = (base_height + scissor_height) / 2.0;
-                    
-                    // X-pattern scissor supports
-                    ctx.draw(&ratatui::widgets::canvas::Line {
-                        x1: base_x - support_offset,
-                        y1: base_height + 5.0,
-                        x2: base_x + support_offset,
-                        y2: scissor_height - 5.0,
+                    // Draw base connection points
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: left_base_x,
+                        y: left_base_y,
+                        radius: 3.0,
                         color: Color::Gray,
                     });
-                    ctx.draw(&ratatui::widgets::canvas::Line {
-                        x1: base_x + support_offset,
-                        y1: base_height + 5.0,
-                        x2: base_x - support_offset,
-                        y2: scissor_height - 5.0,
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: right_base_x,
+                        y: right_base_y,
+                        radius: 3.0,
                         color: Color::Gray,
                     });
                     
-                    // Additional structural elements
-                    ctx.draw(&ratatui::widgets::canvas::Line {
-                        x1: base_x - 2.0,
-                        y1: mid_height,
-                        x2: base_x + 2.0,
-                        y2: mid_height,
-                        color: Color::DarkGray,
+                    // Draw upper connection points
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: left_top_x,
+                        y: left_top_y,
+                        radius: 3.0,
+                        color: Color::LightBlue,
+                    });
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: right_top_x,
+                        y: right_top_y,
+                        radius: 3.0,
+                        color: Color::LightBlue,
                     });
                 }
 
-                // Draw upper platform (tilted based on scissor heights)
+                // Draw upper platform (tilted based on scissor heights) in isometric view
+                // Draw triangular upper plate connecting the three scissor tops
                 for i in 0..upper_plate_points.len() {
-                    let (x1, _y1, h1) = upper_plate_points[i];
-                    let (x2, _y2, h2) = upper_plate_points[(i + 1) % upper_plate_points.len()];
+                    let (x1, y1, h1) = upper_plate_points[i];
+                    let (x2, y2, h2) = upper_plate_points[(i + 1) % upper_plate_points.len()];
                     
-                    // Draw upper plate edge using actual 3D coordinates
+                    // Draw upper plate edge using isometric coordinates
                     let avg_height = (h1 + h2) / 2.0;
                     let brightness = ((avg_height - (nominal_height - 8.0)) / 20.0).clamp(0.0, 1.0);
                     
@@ -416,155 +489,235 @@ impl App {
                         Color::Black
                     };
                     
-                    // Draw the edge of the upper plate using actual coordinates
-                    ctx.draw(&ratatui::widgets::canvas::Line {
-                        x1, y1: h1, x2, y2: h2,
-                        color: line_color,
-                    });
+                    // Draw thick triangular upper plate edges
+                    for thickness in [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5] {
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: x1 + thickness, y1, x2: x2 + thickness, y2,
+                            color: line_color,
+                        });
+                    }
                     
                     // Draw connection points where upper plate meets scissor lifts
                     ctx.draw(&ratatui::widgets::canvas::Circle {
                         x: x1,
-                        y: h1,
-                        radius: 2.0,
+                        y: y1,
+                        radius: 4.0,
                         color: Color::LightBlue,
                     });
                 }
+                
+                // Draw upper plate center area (triangular fill pattern)
+                let center_height = nominal_height;
+                let (center_x, center_y) = to_isometric(0.0, center_height, 0.0);
+                
+                // Draw radial lines from center to each vertex for triangular pattern
+                for (x, y, _h) in &upper_plate_points {
+                    for thickness in [-0.5, 0.0, 0.5] {
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: center_x + thickness,
+                            y1: center_y,
+                            x2: x + thickness,
+                            y2: *y,
+                            color: Color::DarkGray,
+                        });
+                    }
+                }
 
-                // Draw center payload mount on upper plate (much larger and more detailed)
+                // Draw center payload mount on upper plate in isometric view
                 let center_height = nominal_height + 
                     (pitch_angle.to_radians() * 0.0) +  // Center doesn't move much for small tilts
                     (roll_angle.to_radians() * 0.0);
                     
+                let _payload_center = to_isometric(0.0, center_height + 5.0, 0.0);
+                
                 // Main payload mounting ring
-                ctx.draw(&ratatui::widgets::canvas::Circle {
-                    x: 0.0,
-                    y: center_height,
-                    radius: 15.0,  // Much larger for high resolution
-                    color: Color::LightCyan,
-                });
+                let ring_points = 16;
+                let mount_radius = 15.0;
+                for i in 0..ring_points {
+                    let angle1 = i as f64 * 2.0 * std::f64::consts::PI / ring_points as f64;
+                    let angle2 = (i + 1) as f64 * 2.0 * std::f64::consts::PI / ring_points as f64;
+                    
+                    let x1_3d = mount_radius * angle1.cos();
+                    let y1_3d = mount_radius * angle1.sin();
+                    let x2_3d = mount_radius * angle2.cos();
+                    let y2_3d = mount_radius * angle2.sin();
+                    
+                    let (x1, y1) = to_isometric(x1_3d, center_height + 5.0, y1_3d);
+                    let (x2, y2) = to_isometric(x2_3d, center_height + 5.0, y2_3d);
+                    
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1, y1, x2, y2,
+                        color: Color::LightCyan,
+                    });
+                }
                 
                 // Inner mounting ring
-                ctx.draw(&ratatui::widgets::canvas::Circle {
-                    x: 0.0,
-                    y: center_height,
-                    radius: 10.0,
-                    color: Color::Cyan,
-                });
+                let inner_radius = 10.0;
+                for i in 0..ring_points {
+                    let angle1 = i as f64 * 2.0 * std::f64::consts::PI / ring_points as f64;
+                    let angle2 = (i + 1) as f64 * 2.0 * std::f64::consts::PI / ring_points as f64;
+                    
+                    let x1_3d = inner_radius * angle1.cos();
+                    let y1_3d = inner_radius * angle1.sin();
+                    let x2_3d = inner_radius * angle2.cos();
+                    let y2_3d = inner_radius * angle2.sin();
+                    
+                    let (x1, y1) = to_isometric(x1_3d, center_height + 5.0, y1_3d);
+                    let (x2, y2) = to_isometric(x2_3d, center_height + 5.0, y2_3d);
+                    
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1, y1, x2, y2,
+                        color: Color::Cyan,
+                    });
+                }
                 
-                // Draw payload mounting bolt holes (8 holes around circumference)
-                let mount_radius = 12.0;
-                for i in 0..8 {
-                    let angle = i as f64 * std::f64::consts::PI / 4.0;
+                // Draw payload mounting bolt holes (positioned at 120° intervals for triangular pattern)
+                let bolt_radius = 12.0;
+                for i in 0..3 {
+                    let angle = i as f64 * 2.0 * std::f64::consts::PI / 3.0; // 120° spacing
+                    let x_3d = bolt_radius * angle.cos();
+                    let y_3d = bolt_radius * angle.sin();
+                    let (bolt_x, bolt_y) = to_isometric(x_3d, center_height + 5.0, y_3d);
+                    
                     ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: mount_radius * angle.cos(),
-                        y: center_height + mount_radius * angle.sin(),
-                        radius: 2.0,
+                        x: bolt_x,
+                        y: bolt_y,
+                        radius: 3.0,
                         color: Color::DarkGray,
                     });
                 }
 
-                // Draw enhanced tilt visualization lines (much more prominent)
-                let tilt_line_length = platform_radius * 0.9;
+                // Draw enhanced tilt visualization lines in isometric view
+                let tilt_line_length = platform_radius * 0.7;
                 
-                // Roll tilt line (left-right axis) - multiple lines for thickness
+                // Roll tilt line (left-right axis) in isometric
                 let roll_tilt_height = roll_angle.to_radians() * tilt_line_length * 0.3;
-                for offset in [-2.0, -1.0, 0.0, 1.0, 2.0] {
+                let (tilt_left_x, tilt_left_y) = to_isometric(-tilt_line_length, center_height - roll_tilt_height, 0.0);
+                let (tilt_right_x, tilt_right_y) = to_isometric(tilt_line_length, center_height + roll_tilt_height, 0.0);
+                
+                for thickness in [-2.0, -1.0, 0.0, 1.0, 2.0] {
                     ctx.draw(&ratatui::widgets::canvas::Line {
-                        x1: -tilt_line_length,
-                        y1: center_height - roll_tilt_height + offset,
-                        x2: tilt_line_length,
-                        y2: center_height + roll_tilt_height + offset,
+                        x1: tilt_left_x + thickness,
+                        y1: tilt_left_y,
+                        x2: tilt_right_x + thickness,
+                        y2: tilt_right_y,
                         color: Color::Magenta,
                     });
                 }
                 
-                // Pitch tilt line (forward-back axis)
+                // Pitch tilt line (forward-back axis) in isometric
                 let pitch_tilt_height = pitch_angle.to_radians() * tilt_line_length * 0.3;
-                for offset in [-2.0, -1.0, 0.0, 1.0, 2.0] {
+                let (tilt_front_x, tilt_front_y) = to_isometric(0.0, center_height - pitch_tilt_height, -tilt_line_length);
+                let (tilt_back_x, tilt_back_y) = to_isometric(0.0, center_height + pitch_tilt_height, tilt_line_length);
+                
+                for thickness in [-2.0, -1.0, 0.0, 1.0, 2.0] {
                     ctx.draw(&ratatui::widgets::canvas::Line {
-                        x1: 0.0 - pitch_tilt_height + offset,
-                        y1: center_height - tilt_line_length,
-                        x2: 0.0 + pitch_tilt_height + offset,
-                        y2: center_height + tilt_line_length,
+                        x1: tilt_front_x + thickness,
+                        y1: tilt_front_y,
+                        x2: tilt_back_x + thickness,
+                        y2: tilt_back_y,
                         color: Color::Cyan,
                     });
                 }
 
-                // Draw enhanced coordinate system reference 
-                let coord_x = -140.0;
-                let coord_y = -80.0;
-                ctx.draw(&ratatui::widgets::canvas::Line {
-                    x1: coord_x, y1: coord_y, x2: coord_x + 30.0, y2: coord_y,
-                    color: Color::Red,  // X-axis (Roll)
-                });
-                ctx.draw(&ratatui::widgets::canvas::Line {
-                    x1: coord_x, y1: coord_y, x2: coord_x, y2: coord_y + 30.0,
-                    color: Color::Green,  // Y-axis (Pitch)
-                });
-                ctx.draw(&ratatui::widgets::canvas::Line {
-                    x1: coord_x, y1: coord_y, x2: coord_x + 15.0, y2: coord_y + 15.0,
-                    color: Color::Blue,  // Z-axis (Height)
-                });
+                // Draw enhanced coordinate system reference in isometric view
+                let coord_origin_3d = (-140.0, -80.0, 0.0);
+                let (coord_x, coord_y) = to_isometric(coord_origin_3d.0, coord_origin_3d.1, coord_origin_3d.2);
+                
+                // X-axis (Roll) - Red
+                let (x_end_x, x_end_y) = to_isometric(coord_origin_3d.0 + 30.0, coord_origin_3d.1, coord_origin_3d.2);
+                for thickness in [-1.0, 0.0, 1.0] {
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1: coord_x + thickness, y1: coord_y, x2: x_end_x + thickness, y2: x_end_y,
+                        color: Color::Red,
+                    });
+                }
+                
+                // Y-axis (Height) - Green  
+                let (y_end_x, y_end_y) = to_isometric(coord_origin_3d.0, coord_origin_3d.1 + 30.0, coord_origin_3d.2);
+                for thickness in [-1.0, 0.0, 1.0] {
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1: coord_x + thickness, y1: coord_y, x2: y_end_x + thickness, y2: y_end_y,
+                        color: Color::Green,
+                    });
+                }
+                
+                // Z-axis (Pitch) - Blue
+                let (z_end_x, z_end_y) = to_isometric(coord_origin_3d.0, coord_origin_3d.1, coord_origin_3d.2 + 30.0);
+                for thickness in [-1.0, 0.0, 1.0] {
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1: coord_x + thickness, y1: coord_y, x2: z_end_x + thickness, y2: z_end_y,
+                        color: Color::Blue,
+                    });
+                }
 
-                // Enhanced status indicators - much larger and more visible
+                // Enhanced status indicators in isometric view
                 let tilt_magnitude = (pitch_angle.powi(2) + roll_angle.powi(2)).sqrt();
                 if tilt_magnitude > 2.0 {
                     // Tilt warning indicator
+                    let (warning_x, warning_y) = to_isometric(120.0, 80.0, 20.0);
                     ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: 140.0,
-                        y: 80.0,
+                        x: warning_x,
+                        y: warning_y,
                         radius: 8.0,
                         color: Color::Red,
                     });
                     
                     // Draw angle magnitude as visual bar
                     let bar_length = (tilt_magnitude * 3.0).min(30.0);
+                    let (bar_start_x, bar_start_y) = to_isometric(120.0 - bar_length / 2.0, 65.0, 20.0);
+                    let (bar_end_x, bar_end_y) = to_isometric(120.0 + bar_length / 2.0, 65.0, 20.0);
                     ctx.draw(&ratatui::widgets::canvas::Line {
-                        x1: 140.0 - bar_length / 2.0,
-                        y1: 65.0,
-                        x2: 140.0 + bar_length / 2.0,
-                        y2: 65.0,
+                        x1: bar_start_x,
+                        y1: bar_start_y,
+                        x2: bar_end_x,
+                        y2: bar_end_y,
                         color: Color::Red,
                     });
                 }
                 
                 if base_lift.abs() > 2.0 {
                     // Height change indicator
+                    let (height_ind_x, height_ind_y) = to_isometric(120.0, 50.0, 0.0);
                     ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: 140.0,
-                        y: 50.0,
+                        x: height_ind_x,
+                        y: height_ind_y,
                         radius: 8.0,
                         color: if base_lift > 0.0 { Color::LightGreen } else { Color::LightRed },
                     });
                     
                     // Draw height as visual bar
                     let height_bar = (base_lift.abs() * 2.0).min(25.0);
+                    let bar_end_height = if base_lift > 0.0 { 50.0 + height_bar } else { 50.0 - height_bar };
+                    let (height_bar_end_x, height_bar_end_y) = to_isometric(120.0, bar_end_height, 0.0);
+                    
                     ctx.draw(&ratatui::widgets::canvas::Line {
-                        x1: 140.0,
-                        y1: 50.0,
-                        x2: 140.0,
-                        y2: if base_lift > 0.0 { 50.0 + height_bar } else { 50.0 - height_bar },
+                        x1: height_ind_x,
+                        y1: height_ind_y,
+                        x2: height_bar_end_x,
+                        y2: height_bar_end_y,
                         color: if base_lift > 0.0 { Color::LightGreen } else { Color::LightRed },
                     });
                 }
                 
-                // Draw real-time angle readouts as position indicators
+                // Draw real-time angle readouts as position indicators in isometric view
                 if tilt_magnitude > 0.5 {
-                    let angle_indicator_radius = platform_radius * 1.3;
+                    let angle_indicator_radius = platform_radius * 1.1;
                     
                     // Roll angle indicator
+                    let (roll_ind_x, roll_ind_y) = to_isometric(roll_angle * 3.0, angle_indicator_radius, 0.0);
                     ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: roll_angle * 3.0,
-                        y: angle_indicator_radius,
+                        x: roll_ind_x,
+                        y: roll_ind_y,
                         radius: 4.0,
                         color: Color::Magenta,
                     });
                     
                     // Pitch angle indicator  
+                    let (pitch_ind_x, pitch_ind_y) = to_isometric(0.0, angle_indicator_radius, pitch_angle * 3.0);
                     ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: angle_indicator_radius,
-                        y: pitch_angle * 3.0,
+                        x: pitch_ind_x,
+                        y: pitch_ind_y,
                         radius: 4.0,
                         color: Color::Cyan,
                     });
