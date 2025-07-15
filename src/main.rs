@@ -159,9 +159,10 @@ impl App {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(50),  // Left side - Joysticks and motion
-                Constraint::Percentage(25),  // Middle - Buttons
-                Constraint::Percentage(25),  // Right side - All axes
+                Constraint::Percentage(35),  // Left side - Joysticks and motion
+                Constraint::Percentage(30),  // Middle - 3D Gimbal visualization
+                Constraint::Percentage(20),  // Buttons
+                Constraint::Percentage(15),  // Right side - All axes
             ])
             .split(main_chunks[1]);
 
@@ -341,6 +342,135 @@ impl App {
             .y_bounds([-40.0, 40.0]);
         frame.render_widget(rotation_canvas, motion_chunks[1]);
 
+        // 3D Gimbal Visualization
+        let gimbal_canvas = Canvas::default()
+            .block(Block::default().borders(Borders::ALL).title("🎯 EPL 3-Axis Gimbal"))
+            .paint(|ctx| {
+                // Get joystick values for gimbal control
+                let yaw = gamepad.axes.get(&Axis::LeftStickX).copied().unwrap_or(0.0);   // Left stick X -> Yaw
+                let pitch = gamepad.axes.get(&Axis::LeftStickY).copied().unwrap_or(0.0); // Left stick Y -> Pitch  
+                let roll = gamepad.axes.get(&Axis::RightStickX).copied().unwrap_or(0.0); // Right stick X -> Roll
+
+                // Convert joystick values to angles (in radians for calculation)
+                let yaw_angle = (yaw as f64) * std::f64::consts::PI / 4.0;    // ±45 degrees
+                let pitch_angle = (pitch as f64) * std::f64::consts::PI / 4.0; // ±45 degrees
+                let roll_angle = (roll as f64) * std::f64::consts::PI / 4.0;   // ±45 degrees
+
+                // Gimbal dimensions
+                let outer_radius = 45.0;  // Yaw ring (outermost)
+                let middle_radius = 35.0; // Pitch ring
+                let inner_radius = 25.0;  // Roll platform
+
+                // Draw outer yaw ring (rotates around Z-axis)
+                let yaw_points = 16;
+                for i in 0..yaw_points {
+                    let angle1 = (i as f64 * 2.0 * std::f64::consts::PI / yaw_points as f64) + yaw_angle;
+                    let angle2 = ((i + 1) as f64 * 2.0 * std::f64::consts::PI / yaw_points as f64) + yaw_angle;
+                    
+                    let x1 = outer_radius * angle1.cos();
+                    let y1 = outer_radius * angle1.sin();
+                    let x2 = outer_radius * angle2.cos();
+                    let y2 = outer_radius * angle2.sin();
+                    
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1, y1, x2, y2,
+                        color: Color::Cyan,
+                    });
+                }
+
+                // Draw middle pitch ring (rotates around X-axis, but shown as vertical ellipse)
+                let pitch_points = 12;
+                for i in 0..pitch_points {
+                    let angle1 = i as f64 * 2.0 * std::f64::consts::PI / pitch_points as f64;
+                    let angle2 = (i + 1) as f64 * 2.0 * std::f64::consts::PI / pitch_points as f64;
+                    
+                    // Apply pitch rotation (simplified 2D projection)
+                    let x1 = middle_radius * angle1.cos();
+                    let y1 = (middle_radius * angle1.sin()) * pitch_angle.cos() - (middle_radius * 0.3) * pitch_angle.sin();
+                    let x2 = middle_radius * angle2.cos();
+                    let y2 = (middle_radius * angle2.sin()) * pitch_angle.cos() - (middle_radius * 0.3) * pitch_angle.sin();
+                    
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1, y1, x2, y2,
+                        color: Color::Yellow,
+                    });
+                }
+
+                // Draw inner roll platform/gimbal (rotates around Y-axis)
+                let platform_points = 8;
+                for i in 0..platform_points {
+                    let angle1 = (i as f64 * 2.0 * std::f64::consts::PI / platform_points as f64) + roll_angle;
+                    let angle2 = ((i + 1) as f64 * 2.0 * std::f64::consts::PI / platform_points as f64) + roll_angle;
+                    
+                    let x1 = inner_radius * angle1.cos() * 0.7; // Flatten to show roll
+                    let y1 = inner_radius * angle1.sin();
+                    let x2 = inner_radius * angle2.cos() * 0.7;
+                    let y2 = inner_radius * angle2.sin();
+                    
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1, y1, x2, y2,
+                        color: Color::LightRed,
+                    });
+                }
+
+                // Draw gimbal center platform (the payload/camera mount)
+                let platform_size = 15.0;
+                let cos_roll = roll_angle.cos();
+                let sin_roll = roll_angle.sin();
+                
+                // Platform corners (rotated by roll)
+                let corners = [
+                    (-platform_size, -platform_size * 0.5),
+                    (platform_size, -platform_size * 0.5),
+                    (platform_size, platform_size * 0.5),
+                    (-platform_size, platform_size * 0.5),
+                ];
+                
+                for i in 0..4 {
+                    let (x1, y1) = corners[i];
+                    let (x2, y2) = corners[(i + 1) % 4];
+                    
+                    // Apply roll rotation
+                    let rx1 = x1 * cos_roll - y1 * sin_roll;
+                    let ry1 = x1 * sin_roll + y1 * cos_roll + pitch_angle * 10.0; // Add pitch offset
+                    let rx2 = x2 * cos_roll - y2 * sin_roll;
+                    let ry2 = x2 * sin_roll + y2 * cos_roll + pitch_angle * 10.0;
+                    
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1: rx1, y1: ry1, x2: rx2, y2: ry2,
+                        color: Color::LightGreen,
+                    });
+                }
+
+                // Draw center dot to show platform orientation
+                ctx.draw(&ratatui::widgets::canvas::Circle {
+                    x: 0.0,
+                    y: pitch_angle * 10.0,
+                    radius: 3.0,
+                    color: Color::White,
+                });
+
+                // Draw axis indicators
+                // X-axis (roll axis) - Red
+                ctx.draw(&ratatui::widgets::canvas::Line {
+                    x1: -60.0, y1: -60.0, x2: -45.0, y2: -60.0,
+                    color: Color::Red,
+                });
+                // Y-axis (pitch axis) - Green  
+                ctx.draw(&ratatui::widgets::canvas::Line {
+                    x1: -60.0, y1: -60.0, x2: -60.0, y2: -45.0,
+                    color: Color::Green,
+                });
+                // Z-axis (yaw axis) - Blue (diagonal to show depth)
+                ctx.draw(&ratatui::widgets::canvas::Line {
+                    x1: -60.0, y1: -60.0, x2: -50.0, y2: -50.0,
+                    color: Color::Blue,
+                });
+            })
+            .x_bounds([-80.0, 80.0])
+            .y_bounds([-80.0, 80.0]);
+        frame.render_widget(gimbal_canvas, chunks[1]);
+
         // Button status with better styling
         let button_items: Vec<ListItem> = gamepad.buttons.iter()
             .map(|(button, pressed)| {
@@ -359,7 +489,7 @@ impl App {
         let buttons_list = List::new(button_items)
             .block(Block::default().borders(Borders::ALL).title("🎯 Buttons"))
             .style(Style::default());
-        frame.render_widget(buttons_list, chunks[1]);
+        frame.render_widget(buttons_list, chunks[2]);
 
         // Enhanced axis values display - show ALL axes
         let all_possible_axes = [
@@ -375,7 +505,7 @@ impl App {
                 Constraint::Length(3), // Header
                 Constraint::Min(0),    // Axis list
             ])
-            .split(chunks[2]);
+            .split(chunks[3]);
 
         let axis_header = Paragraph::new("📊 All Axes")
             .block(Block::default().borders(Borders::ALL))
@@ -384,6 +514,15 @@ impl App {
 
         // Create a comprehensive list of all detected axes
         let mut axis_display: Vec<(String, f32, Color)> = Vec::new();
+        
+        // Add gimbal angle information first
+        let left_x = gamepad.axes.get(&Axis::LeftStickX).copied().unwrap_or(0.0);
+        let left_y = gamepad.axes.get(&Axis::LeftStickY).copied().unwrap_or(0.0);
+        let right_x = gamepad.axes.get(&Axis::RightStickX).copied().unwrap_or(0.0);
+        
+        axis_display.push(("🎯 Gimbal Yaw".to_string(), left_x, Color::Cyan));
+        axis_display.push(("🎯 Gimbal Pitch".to_string(), left_y, Color::Yellow));
+        axis_display.push(("🎯 Gimbal Roll".to_string(), right_x, Color::LightRed));
         
         // Add known axes with nice names and colors
         for (_category, axes) in all_possible_axes {
