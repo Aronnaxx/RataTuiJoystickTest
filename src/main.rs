@@ -361,8 +361,15 @@ impl App {
                     let compression_factor = (scissor_height_3d - nominal_height) / nominal_height;
                     let current_width = diamond_half_width * (1.0 - compression_factor * 0.3);
                     
-                    let (mid_left_x, mid_left_y) = to_isometric(base_x_3d - current_width, mid_height_3d, base_y_3d);
-                    let (mid_right_x, mid_right_y) = to_isometric(base_x_3d + current_width, mid_height_3d, base_y_3d);
+                    // Calculate proper orientation for diamond scissor lift based on angle
+                    let perpendicular_angle = angle_rad + std::f64::consts::PI / 2.0;
+                    
+                    // Diamond points oriented perpendicular to radius for proper scissors orientation
+                    let diamond_offset_x = current_width * perpendicular_angle.cos();
+                    let diamond_offset_z = current_width * perpendicular_angle.sin();
+                    
+                    let (mid_left_x, mid_left_y) = to_isometric(base_x_3d - diamond_offset_x, mid_height_3d, base_y_3d - diamond_offset_z);
+                    let (mid_right_x, mid_right_y) = to_isometric(base_x_3d + diamond_offset_x, mid_height_3d, base_y_3d + diamond_offset_z);
                     
                     // Draw the diamond-shaped scissor mechanism (4 main struts forming diamond)
                     for thickness in [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5] {
@@ -404,18 +411,43 @@ impl App {
                         });
                     }
                     
-                    // Draw worm gear drive shaft running through center of diamond
-                    for thickness in [-1.0, 0.0, 1.0] {
+                    // Draw horizontal worm gear shaft running through center of diamond (perpendicular to lift)
+                    let worm_start_x = base_x_3d - diamond_offset_x * 0.8;
+                    let worm_start_z = base_y_3d - diamond_offset_z * 0.8;
+                    let worm_end_x = base_x_3d + diamond_offset_x * 0.8;
+                    let worm_end_z = base_y_3d + diamond_offset_z * 0.8;
+                    
+                    let (worm_start_iso_x, worm_start_iso_y) = to_isometric(worm_start_x, mid_height_3d, worm_start_z);
+                    let (worm_end_iso_x, worm_end_iso_y) = to_isometric(worm_end_x, mid_height_3d, worm_end_z);
+                    
+                    for thickness in [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5] {
                         ctx.draw(&ratatui::widgets::canvas::Line {
-                            x1: bottom_tip_x + thickness,
-                            y1: bottom_tip_y,
-                            x2: top_tip_x + thickness,
-                            y2: top_tip_y,
+                            x1: worm_start_iso_x + thickness,
+                            y1: worm_start_iso_y,
+                            x2: worm_end_iso_x + thickness,
+                            y2: worm_end_iso_y,
                             color: Color::DarkGray,
                         });
                     }
                     
-                    // Draw diamond pivot points where struts meet
+                    // Draw threaded pattern on worm gear shaft
+                    let thread_segments = 8;
+                    for i in 0..thread_segments {
+                        let t = i as f64 / thread_segments as f64;
+                        let thread_x = worm_start_x + (worm_end_x - worm_start_x) * t;
+                        let thread_z = worm_start_z + (worm_end_z - worm_start_z) * t;
+                        let thread_offset = (i % 2) as f64 * 2.0 - 1.0; // Alternating offset for threads
+                        
+                        let (thread_iso_x, thread_iso_y) = to_isometric(thread_x, mid_height_3d + thread_offset, thread_z);
+                        ctx.draw(&ratatui::widgets::canvas::Circle {
+                            x: thread_iso_x,
+                            y: thread_iso_y,
+                            radius: 1.0,
+                            color: Color::Gray,
+                        });
+                    }
+                    
+                    // Draw diamond pivot points where struts meet (ball bearings)
                     for (px, py, color, radius) in [
                         (mid_left_x, mid_left_y, Color::White, 3.0),
                         (mid_right_x, mid_right_y, Color::White, 3.0),
@@ -428,16 +460,19 @@ impl App {
                         });
                     }
                     
-                    // Draw stepper motor with worm gear drive (positioned at base for worm gear access)
-                    let (motor_x, motor_y) = to_isometric(base_x_3d, base_height - 8.0, base_y_3d);
+                    // Draw stepper motor mounted on the moving scissor assembly (moves with lift)
+                    let motor_3d_x = base_x_3d + diamond_offset_x * 1.2;
+                    let motor_3d_z = base_y_3d + diamond_offset_z * 1.2;
+                    let (motor_x, motor_y) = to_isometric(motor_3d_x, mid_height_3d, motor_3d_z);
+                    
                     ctx.draw(&ratatui::widgets::canvas::Circle {
                         x: motor_x,
                         y: motor_y,
-                        radius: 6.0,  // Larger motor for worm gear drive
+                        radius: 6.0,  // Motor housing
                         color: Color::Blue,
                     });
                     
-                    // Draw worm gear housing around the motor
+                    // Draw motor housing and mounting bracket
                     ctx.draw(&ratatui::widgets::canvas::Circle {
                         x: motor_x,
                         y: motor_y,
@@ -445,27 +480,32 @@ impl App {
                         color: Color::DarkGray,
                     });
                     
-                    // Draw worm gear connection to scissor lift (gear meshes with threaded shaft)
+                    // Draw motor connection to worm gear (horizontal drive shaft)
                     for thickness in [-1.0, 0.0, 1.0] {
                         ctx.draw(&ratatui::widgets::canvas::Line {
                             x1: motor_x + thickness,
                             y1: motor_y,
-                            x2: bottom_tip_x + thickness,
-                            y2: bottom_tip_y,
+                            x2: (worm_start_iso_x + worm_end_iso_x) / 2.0 + thickness,
+                            y2: (worm_start_iso_y + worm_end_iso_y) / 2.0,
                             color: Color::DarkGray,
                         });
                     }
                     
-                    // Draw mounting brackets for worm gear assembly
-                    let (bracket_left_x, bracket_left_y) = to_isometric(base_x_3d - 5.0, base_height - 8.0, base_y_3d);
-                    let (bracket_right_x, bracket_right_y) = to_isometric(base_x_3d + 5.0, base_height - 8.0, base_y_3d);
-                    ctx.draw(&ratatui::widgets::canvas::Line {
-                        x1: bracket_left_x,
-                        y1: bracket_left_y,
-                        x2: bracket_right_x,
-                        y2: bracket_right_y,
-                        color: Color::DarkGray,
-                    });
+                    // Draw mounting brackets for motor (attached to scissor assembly)
+                    let bracket_size = 4.0;
+                    for bracket_offset in [-bracket_size, bracket_size] {
+                        let bracket_3d_x = motor_3d_x + bracket_offset * perpendicular_angle.cos();
+                        let bracket_3d_z = motor_3d_z + bracket_offset * perpendicular_angle.sin();
+                        let (bracket_x, bracket_y) = to_isometric(bracket_3d_x, mid_height_3d, bracket_3d_z);
+                        
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: motor_x,
+                            y1: motor_y,
+                            x2: bracket_x,
+                            y2: bracket_y,
+                            color: Color::DarkGray,
+                        });
+                    }
                     
                     // Draw connection points - single attachment points like real hardware
                     // Bottom tip connection (fixed to base)
