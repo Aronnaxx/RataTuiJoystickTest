@@ -346,67 +346,117 @@ impl App {
                         Color::Yellow      // Neutral
                     };
                     
-                    // Draw realistic X-pattern scissor mechanism - ensure all struts are visible
-                    let scissor_width = 12.0;  // Slightly reduced for more compact look
+                    // Draw realistic diamond-shaped scissor mechanism - matches real EPL gimbal
+                    let scissor_width = 12.0;  // Width of the diamond pattern
                     let mid_height_3d = (base_height + scissor_height_3d) / 2.0;
                     
-                    // Calculate X-pattern endpoints in 3D then convert to isometric
+                    // Calculate diamond pattern endpoints in 3D then convert to isometric
                     let x_offset = scissor_width * 0.5;
+                    
+                    // Diamond corners in 3D space
                     let (left_base_x, left_base_y) = to_isometric(base_x_3d - x_offset, base_height, base_y_3d);
                     let (right_base_x, right_base_y) = to_isometric(base_x_3d + x_offset, base_height, base_y_3d);
                     let (left_top_x, left_top_y) = to_isometric(base_x_3d - x_offset, scissor_height_3d, base_y_3d);
                     let (right_top_x, right_top_y) = to_isometric(base_x_3d + x_offset, scissor_height_3d, base_y_3d);
-                    let (mid_x, mid_y) = to_isometric(base_x_3d, mid_height_3d, base_y_3d);
                     
-                    // Draw the X-pattern scissor arms with proper thickness - ensure both diagonals are drawn
+                    // Middle diamond points (wider diamond when extended, narrower when compressed)
+                    let diamond_width_factor = 1.0 + (scissor_height_3d - nominal_height) / 20.0;
+                    let mid_left_x_offset = x_offset * diamond_width_factor;
+                    let mid_right_x_offset = x_offset * diamond_width_factor;
+                    
+                    let (mid_left_x, mid_left_y) = to_isometric(base_x_3d - mid_left_x_offset, mid_height_3d, base_y_3d);
+                    let (mid_right_x, mid_right_y) = to_isometric(base_x_3d + mid_right_x_offset, mid_height_3d, base_y_3d);
+                    
+                    // Draw the diamond-shaped scissor mechanism
                     for thickness in [-1.0, -0.5, 0.0, 0.5, 1.0] {
-                        // First diagonal of X (from left-base to right-top)
+                        // Left diamond half - forms a complete diamond shape
+                        // Bottom left to middle left
                         ctx.draw(&ratatui::widgets::canvas::Line {
                             x1: left_base_x + thickness,
                             y1: left_base_y,
+                            x2: mid_left_x + thickness,
+                            y2: mid_left_y,
+                            color: lift_color,
+                        });
+                        
+                        // Middle left to top left
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: mid_left_x + thickness,
+                            y1: mid_left_y,
+                            x2: left_top_x + thickness,
+                            y2: left_top_y,
+                            color: lift_color,
+                        });
+                        
+                        // Right diamond half
+                        // Bottom right to middle right
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: right_base_x + thickness,
+                            y1: right_base_y,
+                            x2: mid_right_x + thickness,
+                            y2: mid_right_y,
+                            color: lift_color,
+                        });
+                        
+                        // Middle right to top right
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: mid_right_x + thickness,
+                            y1: mid_right_y,
                             x2: right_top_x + thickness,
                             y2: right_top_y,
                             color: lift_color,
                         });
                         
-                        // Second diagonal of X (from right-base to left-top)
+                        // Cross braces connecting left and right sides (creating diamond shape)
+                        // Bottom left to middle right
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: left_base_x + thickness,
+                            y1: left_base_y,
+                            x2: mid_right_x + thickness,
+                            y2: mid_right_y,
+                            color: lift_color,
+                        });
+                        
+                        // Bottom right to middle left
                         ctx.draw(&ratatui::widgets::canvas::Line {
                             x1: right_base_x + thickness,
                             y1: right_base_y,
-                            x2: left_top_x + thickness,
-                            y2: left_top_y,
+                            x2: mid_left_x + thickness,
+                            y2: mid_left_y,
+                            color: lift_color,
+                        });
+                        
+                        // Top left to middle right
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: left_top_x + thickness,
+                            y1: left_top_y,
+                            x2: mid_right_x + thickness,
+                            y2: mid_right_y,
+                            color: lift_color,
+                        });
+                        
+                        // Top right to middle left
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: right_top_x + thickness,
+                            y1: right_top_y,
+                            x2: mid_left_x + thickness,
+                            y2: mid_left_y,
                             color: lift_color,
                         });
                     }
                     
-                    // Draw vertical support struts for added structural detail
-                    for thickness in [-0.5, 0.0, 0.5] {
-                        // Left vertical strut
-                        ctx.draw(&ratatui::widgets::canvas::Line {
-                            x1: left_base_x + thickness,
-                            y1: left_base_y,
-                            x2: left_top_x + thickness,
-                            y2: left_top_y,
-                            color: Color::DarkGray,
-                        });
-                        
-                        // Right vertical strut  
-                        ctx.draw(&ratatui::widgets::canvas::Line {
-                            x1: right_base_x + thickness,
-                            y1: right_base_y,
-                            x2: right_top_x + thickness,
-                            y2: right_top_y,
-                            color: Color::DarkGray,
+                    // Draw diamond pivot points
+                    for (px, py, color) in [
+                        (mid_left_x, mid_left_y, Color::White),
+                        (mid_right_x, mid_right_y, Color::White),
+                    ] {
+                        ctx.draw(&ratatui::widgets::canvas::Circle {
+                            x: px,
+                            y: py,
+                            radius: 2.5,
+                            color,
                         });
                     }
-                    
-                    // Draw central pivot point
-                    ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: mid_x,
-                        y: mid_y,
-                        radius: 3.0,
-                        color: Color::White,
-                    });
                     
                     // Draw stepper motor at base (adjusted for squat design)
                     let (motor_x, motor_y) = to_isometric(base_x_3d, base_height - 6.0, base_y_3d);
@@ -428,20 +478,37 @@ impl App {
                         color: Color::DarkGray,
                     });
                     
-                    // Draw connection points
-                    for (px, py, color) in [
-                        (left_base_x, left_base_y, Color::Gray),
-                        (right_base_x, right_base_y, Color::Gray),
-                        (left_top_x, left_top_y, Color::LightBlue),
-                        (right_top_x, right_top_y, Color::LightBlue),
+                    // Draw connection points - ball bearings at top, fixed joints at base
+                    for (px, py, color, radius) in [
+                        (left_base_x, left_base_y, Color::Gray, 2.0),      // Base connections (fixed)
+                        (right_base_x, right_base_y, Color::Gray, 2.0),
+                        (left_top_x, left_top_y, Color::LightBlue, 3.0),   // Top ball bearings (larger)
+                        (right_top_x, right_top_y, Color::LightBlue, 3.0),
                     ] {
                         ctx.draw(&ratatui::widgets::canvas::Circle {
                             x: px,
                             y: py,
-                            radius: 2.0,
+                            radius,
                             color,
                         });
                     }
+                    
+                    // Draw ball bearing detail at the center top connection
+                    let (center_top_x, center_top_y) = to_isometric(base_x_3d, scissor_height_3d, base_y_3d);
+                    // Main ball bearing
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: center_top_x,
+                        y: center_top_y,
+                        radius: 4.0,
+                        color: Color::White,
+                    });
+                    // Inner bearing race
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: center_top_x,
+                        y: center_top_y,
+                        radius: 2.0,
+                        color: Color::Gray,
+                    });
                 }
 
                 // Draw upper platform (circular plate like the real gimbal)
