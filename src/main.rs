@@ -213,23 +213,13 @@ impl App {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(35),  // Left side - Joysticks and motion
-                Constraint::Percentage(30),  // Middle - 3D Gimbal visualization
-                Constraint::Percentage(20),  // Buttons
-                Constraint::Percentage(15),  // Right side - All axes
+                Constraint::Percentage(30),  // Left side - Joysticks only
+                Constraint::Percentage(50),  // Middle - 3D Gimbal visualization (larger!)
+                Constraint::Percentage(20),  // Right side - All axes and buttons
             ])
             .split(main_chunks[1]);
 
-        // Left side - Joysticks and motion sensors
-        let left_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(70),  // Main joysticks
-                Constraint::Percentage(30),  // Motion sensors (Tx, Ty, Tz, Rx, Ry, Rz)
-            ])
-            .split(chunks[0]);
-
-        // Main joystick visualization
+        // Main joystick visualization (full left side)
         let canvas = Canvas::default()
             .block(Block::default().borders(Borders::ALL).title("🕹️  Analog Sticks"))
             .paint(|ctx| {
@@ -318,85 +308,9 @@ impl App {
             })
             .x_bounds([-100.0, 100.0])
             .y_bounds([-50.0, 50.0]);
-        frame.render_widget(canvas, left_chunks[0]);
+        frame.render_widget(canvas, chunks[0]);
 
-        // Motion sensors visualization
-        let motion_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(50),  // Translation (Tx, Ty, Tz)
-                Constraint::Percentage(50),  // Rotation (Rx, Ry, Rz)
-            ])
-            .split(left_chunks[1]);
-
-        // Translation sensors (Tx, Ty, Tz)
-        let translation_canvas = Canvas::default()
-            .block(Block::default().borders(Borders::ALL).title("📍 Motion Sensors"))
-            .paint(|ctx| {
-                // Draw 3D coordinate system
-                ctx.draw(&ratatui::widgets::canvas::Line {
-                    x1: 0.0, y1: 0.0, x2: 30.0, y2: 0.0, color: Color::Red,  // X axis
-                });
-                ctx.draw(&ratatui::widgets::canvas::Line {
-                    x1: 0.0, y1: 0.0, x2: 0.0, y2: 30.0, color: Color::Green,  // Y axis  
-                });
-                ctx.draw(&ratatui::widgets::canvas::Line {
-                    x1: 0.0, y1: 0.0, x2: -15.0, y2: -15.0, color: Color::Blue,  // Z axis (perspective)
-                });
-
-                // Find and display any motion sensor values
-                let mut motion_detected = false;
-                for (axis, &value) in &gamepad.axes {
-                    let axis_name = format!("{:?}", axis);
-                    // Look for motion sensor axes (not standard gamepad axes)
-                    if !matches!(axis, Axis::LeftStickX | Axis::LeftStickY | Axis::RightStickX | 
-                                      Axis::RightStickY | Axis::LeftZ | Axis::RightZ | 
-                                      Axis::DPadX | Axis::DPadY) {
-                        // Draw motion indicator
-                        let x_pos = (value * 25.0).clamp(-35.0, 35.0);
-                        ctx.draw(&ratatui::widgets::canvas::Circle {
-                            x: x_pos as f64,
-                            y: 0.0,
-                            radius: 3.0,
-                            color: if axis_name.contains('T') { Color::Yellow } else { Color::Magenta },
-                        });
-                        motion_detected = true;
-                    }
-                }
-
-                if !motion_detected {
-                    // Show a neutral indicator
-                    ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: 0.0, y: 0.0, radius: 2.0, color: Color::DarkGray,
-                    });
-                }
-            })
-            .x_bounds([-40.0, 40.0])
-            .y_bounds([-40.0, 40.0]);
-        frame.render_widget(translation_canvas, motion_chunks[0]);
-
-        // Rotation sensors (Rx, Ry, Rz)
-        let rotation_canvas = Canvas::default()
-            .block(Block::default().borders(Borders::ALL).title("🔄 Rotation (R)"))
-            .paint(|ctx| {
-                // Draw rotation indicators - circular arcs would be ideal but we'll use lines
-                ctx.draw(&ratatui::widgets::canvas::Circle {
-                    x: 0.0, y: 0.0, radius: 30.0, color: Color::White,
-                });
-                ctx.draw(&ratatui::widgets::canvas::Circle {
-                    x: 0.0, y: 0.0, radius: 15.0, color: Color::DarkGray,
-                });
-                
-                // Draw rotation indicator
-                ctx.draw(&ratatui::widgets::canvas::Circle {
-                    x: 0.0, y: 0.0, radius: 5.0, color: Color::Magenta,
-                });
-            })
-            .x_bounds([-40.0, 40.0])
-            .y_bounds([-40.0, 40.0]);
-        frame.render_widget(rotation_canvas, motion_chunks[1]);
-
-        // 3D Gimbal Visualization - EPL Parallel Plate Design
+        // 3D Gimbal Visualization - EPL Parallel Plate Design (Higher Resolution)
         let gimbal_canvas = Canvas::default()
             .block(Block::default().borders(Borders::ALL).title("🎯 EPL Parallel Plate Gimbal"))
             .paint(|ctx| {
@@ -424,12 +338,12 @@ impl App {
                 let base_lift = (z_movement * 15.0) as f64;  // ±15mm vertical movement
 
                 // Platform dimensions and base positions (FIXED - no rotation)
-                let platform_radius = 40.0;
-                let base_height = -20.0;
-                let nominal_height = 10.0 + base_lift;  // Overall height adjustment
+                let platform_radius = 60.0;  // Larger for higher resolution
+                let base_height = -30.0;
+                let nominal_height = 15.0 + base_lift;  // Overall height adjustment
 
                 // Draw base platform (fixed lower plate) - always stationary
-                let base_points = 8;
+                let base_points = 12;  // More segments for smoother circle
                 for i in 0..base_points {
                     let angle1 = i as f64 * 2.0 * std::f64::consts::PI / base_points as f64;
                     let angle2 = (i + 1) as f64 * 2.0 * std::f64::consts::PI / base_points as f64;
@@ -442,6 +356,22 @@ impl App {
                     ctx.draw(&ratatui::widgets::canvas::Line {
                         x1, y1, x2, y2,
                         color: Color::DarkGray,
+                    });
+                }
+
+                // Draw inner reference circle
+                let inner_points = 8;
+                for i in 0..inner_points {
+                    let angle1 = i as f64 * 2.0 * std::f64::consts::PI / inner_points as f64;
+                    let angle2 = (i + 1) as f64 * 2.0 * std::f64::consts::PI / inner_points as f64;
+                    
+                    let radius = platform_radius * 0.5;
+                    let x1 = radius * angle1.cos();
+                    let x2 = radius * angle2.cos();
+                    
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1, y1: base_height, x2, y2: base_height,
+                        color: Color::Gray,
                     });
                 }
 
@@ -477,14 +407,15 @@ impl App {
                     
                     // Draw scissor lift with realistic color coding
                     let extension = scissor_height - nominal_height;
-                    let lift_color = if extension > 3.0 {
+                    let lift_color = if extension > 4.0 {
                         Color::LightGreen  // Extended
-                    } else if extension < -3.0 {
+                    } else if extension < -4.0 {
                         Color::LightRed    // Retracted
                     } else {
                         Color::Yellow      // Neutral
                     };
                     
+                    // Draw main scissor lift
                     ctx.draw(&ratatui::widgets::canvas::Line {
                         x1: base_x,
                         y1: base_height,
@@ -493,32 +424,52 @@ impl App {
                         color: lift_color,
                     });
                     
-                    // Draw stepper motor housing at base (fixed position)
+                    // Draw stepper motor housing at base (larger for better visibility)
                     ctx.draw(&ratatui::widgets::canvas::Circle {
                         x: base_x,
-                        y: base_height - 3.0,
-                        radius: 2.0,
+                        y: base_height - 4.0,
+                        radius: 3.0,
                         color: Color::Blue,
                     });
                     
-                    // Draw scissor mechanism (simplified)
-                    let mid_height = (base_height + scissor_height) / 2.0;
-                    ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: base_x,
-                        y: mid_height,
-                        radius: 1.0,
-                        color: Color::Gray,
+                    // Draw scissor mechanism joints (more detailed)
+                    let num_joints = 3;
+                    for j in 1..num_joints {
+                        let joint_height = base_height + (scissor_height - base_height) * j as f64 / num_joints as f64;
+                        ctx.draw(&ratatui::widgets::canvas::Circle {
+                            x: base_x,
+                            y: joint_height,
+                            radius: 1.5,
+                            color: Color::Gray,
+                        });
+                    }
+                    
+                    // Draw scissor support structure
+                    let support_offset = 2.0;
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1: base_x - support_offset,
+                        y1: base_height,
+                        x2: base_x + support_offset,
+                        y2: scissor_height,
+                        color: Color::DarkGray,
+                    });
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1: base_x + support_offset,
+                        y1: base_height,
+                        x2: base_x - support_offset,
+                        y2: scissor_height,
+                        color: Color::DarkGray,
                     });
                 }
 
                 // Draw upper platform (tilted based on scissor heights)
                 for i in 0..upper_plate_points.len() {
-                    let (x1, y1, h1) = upper_plate_points[i];
-                    let (x2, y2, h2) = upper_plate_points[(i + 1) % upper_plate_points.len()];
+                    let (x1, _y1, h1) = upper_plate_points[i];
+                    let (x2, _y2, h2) = upper_plate_points[(i + 1) % upper_plate_points.len()];
                     
                     // Draw upper plate edge using actual 3D coordinates
                     let avg_height = (h1 + h2) / 2.0;
-                    let brightness = ((avg_height - (nominal_height - 5.0)) / 15.0).clamp(0.0, 1.0);
+                    let brightness = ((avg_height - (nominal_height - 8.0)) / 20.0).clamp(0.0, 1.0);
                     
                     let line_color = if brightness > 0.8 {
                         Color::White
@@ -540,12 +491,12 @@ impl App {
                     ctx.draw(&ratatui::widgets::canvas::Circle {
                         x: x1,
                         y: h1,
-                        radius: 1.5,
+                        radius: 2.0,
                         color: Color::LightBlue,
                     });
                 }
 
-                // Draw center payload mount on upper plate
+                // Draw center payload mount on upper plate (larger)
                 let center_height = nominal_height + 
                     (pitch_angle.to_radians() * 0.0) +  // Center doesn't move much for small tilts
                     (roll_angle.to_radians() * 0.0);
@@ -553,15 +504,27 @@ impl App {
                 ctx.draw(&ratatui::widgets::canvas::Circle {
                     x: 0.0,
                     y: center_height,
-                    radius: 5.0,
+                    radius: 8.0,
                     color: Color::LightCyan,
                 });
-
-                // Draw tilt visualization lines on the upper plate
-                let tilt_line_length = platform_radius * 0.7;
                 
-                // Roll tilt line (left-right axis)
-                let roll_tilt_height = roll_angle.to_radians() * tilt_line_length * 0.5;
+                // Draw payload mounting points
+                let mount_radius = 5.0;
+                for i in 0..4 {
+                    let angle = i as f64 * std::f64::consts::PI / 2.0;
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: mount_radius * angle.cos(),
+                        y: center_height + mount_radius * angle.sin(),
+                        radius: 1.0,
+                        color: Color::Cyan,
+                    });
+                }
+
+                // Draw tilt visualization lines on the upper plate (more prominent)
+                let tilt_line_length = platform_radius * 0.8;
+                
+                // Roll tilt line (left-right axis) - thicker representation
+                let roll_tilt_height = roll_angle.to_radians() * tilt_line_length * 0.4;
                 ctx.draw(&ratatui::widgets::canvas::Line {
                     x1: -tilt_line_length,
                     y1: center_height - roll_tilt_height,
@@ -571,7 +534,7 @@ impl App {
                 });
                 
                 // Pitch tilt line (forward-back axis)
-                let pitch_tilt_height = pitch_angle.to_radians() * tilt_line_length * 0.5;
+                let pitch_tilt_height = pitch_angle.to_radians() * tilt_line_length * 0.4;
                 ctx.draw(&ratatui::widgets::canvas::Line {
                     x1: 0.0 - pitch_tilt_height,
                     y1: center_height - tilt_line_length,
@@ -582,41 +545,61 @@ impl App {
 
                 // Draw coordinate system reference (fixed to world, not gimbal)
                 ctx.draw(&ratatui::widgets::canvas::Line {
-                    x1: -70.0, y1: -40.0, x2: -55.0, y2: -40.0,
+                    x1: -90.0, y1: -45.0, x2: -70.0, y2: -45.0,
                     color: Color::Red,  // X-axis (Roll)
                 });
                 ctx.draw(&ratatui::widgets::canvas::Line {
-                    x1: -70.0, y1: -40.0, x2: -70.0, y2: -25.0,
+                    x1: -90.0, y1: -45.0, x2: -90.0, y2: -25.0,
                     color: Color::Green,  // Y-axis (Pitch)
                 });
                 ctx.draw(&ratatui::widgets::canvas::Line {
-                    x1: -70.0, y1: -40.0, x2: -60.0, y2: -30.0,
+                    x1: -90.0, y1: -45.0, x2: -75.0, y2: -30.0,
                     color: Color::Blue,  // Z-axis (Height)
                 });
 
-                // Status indicators
+                // Enhanced status indicators
                 let tilt_magnitude = (pitch_angle.powi(2) + roll_angle.powi(2)).sqrt();
                 if tilt_magnitude > 2.0 {
                     ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: 55.0,
-                        y: 35.0,
-                        radius: 3.0,
+                        x: 70.0,
+                        y: 40.0,
+                        radius: 4.0,
                         color: Color::Red,
                     });
                 }
                 
                 if base_lift.abs() > 2.0 {
                     ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: 55.0,
+                        x: 70.0,
                         y: 25.0,
-                        radius: 3.0,
+                        radius: 4.0,
                         color: if base_lift > 0.0 { Color::LightGreen } else { Color::LightRed },
                     });
                 }
+                
+                // Draw angle readouts as visual indicators
+                if tilt_magnitude > 0.5 {
+                    let angle_indicator_radius = platform_radius * 1.2;
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: roll_angle * 2.0,
+                        y: angle_indicator_radius + pitch_angle * 2.0,
+                        radius: 2.0,
+                        color: Color::Yellow,
+                    });
+                }
             })
-            .x_bounds([-80.0, 80.0])
-            .y_bounds([-50.0, 50.0]);
+            .x_bounds([-120.0, 120.0])  // Increased bounds for higher resolution
+            .y_bounds([-60.0, 60.0]);
         frame.render_widget(gimbal_canvas, chunks[1]);
+
+        // Right side - Combined buttons and axes display
+        let right_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(40),  // Buttons
+                Constraint::Percentage(60),  // All axes
+            ])
+            .split(chunks[2]);
 
         // Button status with better styling
         let button_items: Vec<ListItem> = gamepad.buttons.iter()
@@ -636,7 +619,7 @@ impl App {
         let buttons_list = List::new(button_items)
             .block(Block::default().borders(Borders::ALL).title("🎯 Buttons"))
             .style(Style::default());
-        frame.render_widget(buttons_list, chunks[2]);
+        frame.render_widget(buttons_list, right_chunks[0]);
 
         // Enhanced axis values display - show ALL axes
         let all_possible_axes = [
@@ -652,7 +635,7 @@ impl App {
                 Constraint::Length(3), // Header
                 Constraint::Min(0),    // Axis list
             ])
-            .split(chunks[3]);
+            .split(right_chunks[1]);
 
         let axis_header = Paragraph::new("📊 All Axes")
             .block(Block::default().borders(Borders::ALL))
