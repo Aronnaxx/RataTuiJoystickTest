@@ -346,144 +346,79 @@ impl App {
                         Color::Yellow      // Neutral
                     };
                     
-                    // Draw realistic diamond-shaped scissor mechanism - matches real EPL gimbal
-                    let scissor_width = 12.0;  // Width of the diamond pattern
+                    // Draw realistic large diamond-shaped scissor mechanism - spans most of base plate
+                    let scissor_width = platform_radius * 0.6;  // Much larger - spans most of base plate like real hardware
                     let mid_height_3d = (base_height + scissor_height_3d) / 2.0;
                     
-                    // Calculate diamond pattern endpoints in 3D then convert to isometric
-                    let x_offset = scissor_width * 0.5;
+                    // Calculate diamond pattern endpoints - single points at tips like real hardware
+                    let diamond_half_width = scissor_width * 0.5;
                     
-                    // Diamond corners in 3D space
-                    let (left_base_x, left_base_y) = to_isometric(base_x_3d - x_offset, base_height, base_y_3d);
-                    let (right_base_x, right_base_y) = to_isometric(base_x_3d + x_offset, base_height, base_y_3d);
-                    let (left_top_x, left_top_y) = to_isometric(base_x_3d - x_offset, scissor_height_3d, base_y_3d);
-                    let (right_top_x, right_top_y) = to_isometric(base_x_3d + x_offset, scissor_height_3d, base_y_3d);
+                    // Diamond tips - single attachment points (not scaffold)
+                    let (bottom_tip_x, bottom_tip_y) = to_isometric(base_x_3d, base_height, base_y_3d);
+                    let (top_tip_x, top_tip_y) = to_isometric(base_x_3d, scissor_height_3d, base_y_3d);
                     
                     // Middle diamond points (wider diamond when extended, narrower when compressed)
-                    let diamond_width_factor = 1.0 + (scissor_height_3d - nominal_height) / 20.0;
-                    let mid_left_x_offset = x_offset * diamond_width_factor;
-                    let mid_right_x_offset = x_offset * diamond_width_factor;
+                    let compression_factor = (scissor_height_3d - nominal_height) / nominal_height;
+                    let current_width = diamond_half_width * (1.0 - compression_factor * 0.3);
                     
-                    let (mid_left_x, mid_left_y) = to_isometric(base_x_3d - mid_left_x_offset, mid_height_3d, base_y_3d);
-                    let (mid_right_x, mid_right_y) = to_isometric(base_x_3d + mid_right_x_offset, mid_height_3d, base_y_3d);
+                    let (mid_left_x, mid_left_y) = to_isometric(base_x_3d - current_width, mid_height_3d, base_y_3d);
+                    let (mid_right_x, mid_right_y) = to_isometric(base_x_3d + current_width, mid_height_3d, base_y_3d);
                     
-                    // Draw the diamond-shaped scissor mechanism
-                    for thickness in [-1.0, -0.5, 0.0, 0.5, 1.0] {
-                        // Left diamond half - forms a complete diamond shape
-                        // Bottom left to middle left
+                    // Draw the diamond-shaped scissor mechanism (4 main struts forming diamond)
+                    for thickness in [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5] {
+                        // Four main diamond struts
+                        // Bottom tip to left middle
                         ctx.draw(&ratatui::widgets::canvas::Line {
-                            x1: left_base_x + thickness,
-                            y1: left_base_y,
+                            x1: bottom_tip_x + thickness,
+                            y1: bottom_tip_y,
                             x2: mid_left_x + thickness,
                             y2: mid_left_y,
                             color: lift_color,
                         });
                         
-                        // Middle left to top left
+                        // Bottom tip to right middle  
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: bottom_tip_x + thickness,
+                            y1: bottom_tip_y,
+                            x2: mid_right_x + thickness,
+                            y2: mid_right_y,
+                            color: lift_color,
+                        });
+                        
+                        // Left middle to top tip
                         ctx.draw(&ratatui::widgets::canvas::Line {
                             x1: mid_left_x + thickness,
                             y1: mid_left_y,
-                            x2: left_top_x + thickness,
-                            y2: left_top_y,
+                            x2: top_tip_x + thickness,
+                            y2: top_tip_y,
                             color: lift_color,
                         });
                         
-                        // Right diamond half
-                        // Bottom right to middle right
-                        ctx.draw(&ratatui::widgets::canvas::Line {
-                            x1: right_base_x + thickness,
-                            y1: right_base_y,
-                            x2: mid_right_x + thickness,
-                            y2: mid_right_y,
-                            color: lift_color,
-                        });
-                        
-                        // Middle right to top right
+                        // Right middle to top tip
                         ctx.draw(&ratatui::widgets::canvas::Line {
                             x1: mid_right_x + thickness,
                             y1: mid_right_y,
-                            x2: right_top_x + thickness,
-                            y2: right_top_y,
-                            color: lift_color,
-                        });
-                        
-                        // Cross braces connecting left and right sides (creating diamond shape)
-                        // Bottom left to middle right
-                        ctx.draw(&ratatui::widgets::canvas::Line {
-                            x1: left_base_x + thickness,
-                            y1: left_base_y,
-                            x2: mid_right_x + thickness,
-                            y2: mid_right_y,
-                            color: lift_color,
-                        });
-                        
-                        // Bottom right to middle left
-                        ctx.draw(&ratatui::widgets::canvas::Line {
-                            x1: right_base_x + thickness,
-                            y1: right_base_y,
-                            x2: mid_left_x + thickness,
-                            y2: mid_left_y,
-                            color: lift_color,
-                        });
-                        
-                        // Top left to middle right
-                        ctx.draw(&ratatui::widgets::canvas::Line {
-                            x1: left_top_x + thickness,
-                            y1: left_top_y,
-                            x2: mid_right_x + thickness,
-                            y2: mid_right_y,
-                            color: lift_color,
-                        });
-                        
-                        // Top right to middle left
-                        ctx.draw(&ratatui::widgets::canvas::Line {
-                            x1: right_top_x + thickness,
-                            y1: right_top_y,
-                            x2: mid_left_x + thickness,
-                            y2: mid_left_y,
+                            x2: top_tip_x + thickness,
+                            y2: top_tip_y,
                             color: lift_color,
                         });
                     }
                     
-                    // Draw diamond pivot points
-                    for (px, py, color) in [
-                        (mid_left_x, mid_left_y, Color::White),
-                        (mid_right_x, mid_right_y, Color::White),
-                    ] {
-                        ctx.draw(&ratatui::widgets::canvas::Circle {
-                            x: px,
-                            y: py,
-                            radius: 2.5,
-                            color,
+                    // Draw worm gear drive shaft running through center of diamond
+                    for thickness in [-1.0, 0.0, 1.0] {
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: bottom_tip_x + thickness,
+                            y1: bottom_tip_y,
+                            x2: top_tip_x + thickness,
+                            y2: top_tip_y,
+                            color: Color::DarkGray,
                         });
                     }
                     
-                    // Draw stepper motor at base (adjusted for squat design)
-                    let (motor_x, motor_y) = to_isometric(base_x_3d, base_height - 6.0, base_y_3d);
-                    ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: motor_x,
-                        y: motor_y,
-                        radius: 5.0,  // Slightly smaller for better proportions
-                        color: Color::Blue,
-                    });
-                    
-                    // Draw mounting brackets (adjusted for squat design)
-                    let (bracket_left_x, bracket_left_y) = to_isometric(base_x_3d - 3.0, base_height - 6.0, base_y_3d);
-                    let (bracket_right_x, bracket_right_y) = to_isometric(base_x_3d + 3.0, base_height - 6.0, base_y_3d);
-                    ctx.draw(&ratatui::widgets::canvas::Line {
-                        x1: bracket_left_x,
-                        y1: bracket_left_y,
-                        x2: bracket_right_x,
-                        y2: bracket_right_y,
-                        color: Color::DarkGray,
-                    });
-                    
-                    // Draw connection points - ball bearings at top, fixed joints at base
+                    // Draw diamond pivot points where struts meet
                     for (px, py, color, radius) in [
-                        (left_base_x, left_base_y, Color::Gray, 2.0),      // Base connections (fixed)
-                        (right_base_x, right_base_y, Color::Gray, 2.0),
-                        (left_top_x, left_top_y, Color::LightBlue, 3.0),   // Top ball bearings (larger)
-                        (right_top_x, right_top_y, Color::LightBlue, 3.0),
+                        (mid_left_x, mid_left_y, Color::White, 3.0),
+                        (mid_right_x, mid_right_y, Color::White, 3.0),
                     ] {
                         ctx.draw(&ratatui::widgets::canvas::Circle {
                             x: px,
@@ -493,20 +428,75 @@ impl App {
                         });
                     }
                     
-                    // Draw ball bearing detail at the center top connection
-                    let (center_top_x, center_top_y) = to_isometric(base_x_3d, scissor_height_3d, base_y_3d);
-                    // Main ball bearing
+                    // Draw stepper motor with worm gear drive (positioned at base for worm gear access)
+                    let (motor_x, motor_y) = to_isometric(base_x_3d, base_height - 8.0, base_y_3d);
                     ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: center_top_x,
-                        y: center_top_y,
+                        x: motor_x,
+                        y: motor_y,
+                        radius: 6.0,  // Larger motor for worm gear drive
+                        color: Color::Blue,
+                    });
+                    
+                    // Draw worm gear housing around the motor
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: motor_x,
+                        y: motor_y,
+                        radius: 8.0,
+                        color: Color::DarkGray,
+                    });
+                    
+                    // Draw worm gear connection to scissor lift (gear meshes with threaded shaft)
+                    for thickness in [-1.0, 0.0, 1.0] {
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: motor_x + thickness,
+                            y1: motor_y,
+                            x2: bottom_tip_x + thickness,
+                            y2: bottom_tip_y,
+                            color: Color::DarkGray,
+                        });
+                    }
+                    
+                    // Draw mounting brackets for worm gear assembly
+                    let (bracket_left_x, bracket_left_y) = to_isometric(base_x_3d - 5.0, base_height - 8.0, base_y_3d);
+                    let (bracket_right_x, bracket_right_y) = to_isometric(base_x_3d + 5.0, base_height - 8.0, base_y_3d);
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1: bracket_left_x,
+                        y1: bracket_left_y,
+                        x2: bracket_right_x,
+                        y2: bracket_right_y,
+                        color: Color::DarkGray,
+                    });
+                    
+                    // Draw connection points - single attachment points like real hardware
+                    // Bottom tip connection (fixed to base)
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: bottom_tip_x,
+                        y: bottom_tip_y,
+                        radius: 3.0,
+                        color: Color::Gray,
+                    });
+                    
+                    // Top tip connection (ball bearing to upper plate)
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: top_tip_x,
+                        y: top_tip_y,
                         radius: 4.0,
+                        color: Color::LightBlue,
+                    });
+                    
+                    // Draw enhanced ball bearing detail at the top connection
+                    // Main ball bearing housing
+                    ctx.draw(&ratatui::widgets::canvas::Circle {
+                        x: top_tip_x,
+                        y: top_tip_y,
+                        radius: 5.0,
                         color: Color::White,
                     });
                     // Inner bearing race
                     ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: center_top_x,
-                        y: center_top_y,
-                        radius: 2.0,
+                        x: top_tip_x,
+                        y: top_tip_y,
+                        radius: 2.5,
                         color: Color::Gray,
                     });
                 }
