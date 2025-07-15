@@ -346,8 +346,8 @@ impl App {
                         Color::Yellow      // Neutral
                     };
                     
-                    // Draw realistic large diamond-shaped scissor mechanism - spans most of base plate
-                    let scissor_width = platform_radius * 0.6;  // Much larger - spans most of base plate like real hardware
+                    // Draw realistic large diamond-shaped scissor mechanism - spans nearly entire base plate
+                    let scissor_width = platform_radius * 1.2;  // Much larger - nearly touching other lifts
                     let mid_height_3d = (base_height + scissor_height_3d) / 2.0;
                     
                     // Calculate diamond pattern endpoints - single points at tips like real hardware
@@ -371,8 +371,8 @@ impl App {
                     let (mid_left_x, mid_left_y) = to_isometric(base_x_3d - diamond_offset_x, mid_height_3d, base_y_3d - diamond_offset_z);
                     let (mid_right_x, mid_right_y) = to_isometric(base_x_3d + diamond_offset_x, mid_height_3d, base_y_3d + diamond_offset_z);
                     
-                    // Draw the diamond-shaped scissor mechanism (4 main struts forming diamond)
-                    for thickness in [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5] {
+                    // Draw the diamond-shaped scissor mechanism (4 main struts forming diamond) - much thicker
+                    for thickness in [-3.0, -2.5, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0] {
                         // Four main diamond struts
                         // Bottom tip to left middle
                         ctx.draw(&ratatui::widgets::canvas::Line {
@@ -411,7 +411,7 @@ impl App {
                         });
                     }
                     
-                    // Draw horizontal worm gear shaft running through center of diamond (perpendicular to lift)
+                    // Draw horizontal worm gear shaft running through center of diamond (perpendicular to lift) - thicker
                     let worm_start_x = base_x_3d - diamond_offset_x * 0.8;
                     let worm_start_z = base_y_3d - diamond_offset_z * 0.8;
                     let worm_end_x = base_x_3d + diamond_offset_x * 0.8;
@@ -420,7 +420,7 @@ impl App {
                     let (worm_start_iso_x, worm_start_iso_y) = to_isometric(worm_start_x, mid_height_3d, worm_start_z);
                     let (worm_end_iso_x, worm_end_iso_y) = to_isometric(worm_end_x, mid_height_3d, worm_end_z);
                     
-                    for thickness in [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5] {
+                    for thickness in [-2.5, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5] {
                         ctx.draw(&ratatui::widgets::canvas::Line {
                             x1: worm_start_iso_x + thickness,
                             y1: worm_start_iso_y,
@@ -447,10 +447,10 @@ impl App {
                         });
                     }
                     
-                    // Draw diamond pivot points where struts meet (ball bearings)
+                    // Draw diamond pivot points where struts meet (ball bearings) - larger
                     for (px, py, color, radius) in [
-                        (mid_left_x, mid_left_y, Color::White, 3.0),
-                        (mid_right_x, mid_right_y, Color::White, 3.0),
+                        (mid_left_x, mid_left_y, Color::White, 4.5),
+                        (mid_right_x, mid_right_y, Color::White, 4.5),
                     ] {
                         ctx.draw(&ratatui::widgets::canvas::Circle {
                             x: px,
@@ -460,28 +460,60 @@ impl App {
                         });
                     }
                     
-                    // Draw stepper motor mounted on the moving scissor assembly (moves with lift)
+                    // Draw square stepper motor mounted on the moving scissor assembly (moves with lift)
                     let motor_3d_x = base_x_3d + diamond_offset_x * 1.2;
                     let motor_3d_z = base_y_3d + diamond_offset_z * 1.2;
                     let (motor_x, motor_y) = to_isometric(motor_3d_x, mid_height_3d, motor_3d_z);
                     
-                    ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: motor_x,
-                        y: motor_y,
-                        radius: 6.0,  // Motor housing
-                        color: Color::Blue,
-                    });
+                    // Draw square motor housing (stepper motors are square, not circular)
+                    let motor_size = 8.0;  // Half-size for square motor
+                    let motor_corners = [
+                        (-motor_size, -motor_size),
+                        (motor_size, -motor_size),
+                        (motor_size, motor_size),
+                        (-motor_size, motor_size),
+                    ];
                     
-                    // Draw motor housing and mounting bracket
-                    ctx.draw(&ratatui::widgets::canvas::Circle {
-                        x: motor_x,
-                        y: motor_y,
-                        radius: 8.0,
-                        color: Color::DarkGray,
-                    });
+                    // Draw square motor body
+                    for i in 0..4 {
+                        let (x1, y1) = motor_corners[i];
+                        let (x2, y2) = motor_corners[(i + 1) % 4];
+                        
+                        for thickness in [-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0] {
+                            ctx.draw(&ratatui::widgets::canvas::Line {
+                                x1: motor_x + x1 + thickness,
+                                y1: motor_y + y1,
+                                x2: motor_x + x2 + thickness,
+                                y2: motor_y + y2,
+                                color: Color::Blue,
+                            });
+                        }
+                    }
                     
-                    // Draw motor connection to worm gear (horizontal drive shaft)
-                    for thickness in [-1.0, 0.0, 1.0] {
+                    // Draw square motor housing outline
+                    let housing_size = motor_size + 2.0;
+                    let housing_corners = [
+                        (-housing_size, -housing_size),
+                        (housing_size, -housing_size),
+                        (housing_size, housing_size),
+                        (-housing_size, housing_size),
+                    ];
+                    
+                    for i in 0..4 {
+                        let (x1, y1) = housing_corners[i];
+                        let (x2, y2) = housing_corners[(i + 1) % 4];
+                        
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: motor_x + x1,
+                            y1: motor_y + y1,
+                            x2: motor_x + x2,
+                            y2: motor_y + y2,
+                            color: Color::DarkGray,
+                        });
+                    }
+                    
+                    // Draw motor connection to worm gear (horizontal drive shaft) - thicker
+                    for thickness in [-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0] {
                         ctx.draw(&ratatui::widgets::canvas::Line {
                             x1: motor_x + thickness,
                             y1: motor_y,
@@ -491,28 +523,30 @@ impl App {
                         });
                     }
                     
-                    // Draw mounting brackets for motor (attached to scissor assembly)
-                    let bracket_size = 4.0;
+                    // Draw mounting brackets for motor (attached to scissor assembly) - thicker
+                    let bracket_size = 6.0;  // Larger brackets for bigger motor
                     for bracket_offset in [-bracket_size, bracket_size] {
                         let bracket_3d_x = motor_3d_x + bracket_offset * perpendicular_angle.cos();
                         let bracket_3d_z = motor_3d_z + bracket_offset * perpendicular_angle.sin();
                         let (bracket_x, bracket_y) = to_isometric(bracket_3d_x, mid_height_3d, bracket_3d_z);
                         
-                        ctx.draw(&ratatui::widgets::canvas::Line {
-                            x1: motor_x,
-                            y1: motor_y,
-                            x2: bracket_x,
-                            y2: bracket_y,
-                            color: Color::DarkGray,
-                        });
+                        for thickness in [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5] {
+                            ctx.draw(&ratatui::widgets::canvas::Line {
+                                x1: motor_x + thickness,
+                                y1: motor_y,
+                                x2: bracket_x + thickness,
+                                y2: bracket_y,
+                                color: Color::DarkGray,
+                            });
+                        }
                     }
                     
-                    // Draw connection points - single attachment points like real hardware
+                    // Draw connection points - single attachment points like real hardware (larger)
                     // Bottom tip connection (fixed to base)
                     ctx.draw(&ratatui::widgets::canvas::Circle {
                         x: bottom_tip_x,
                         y: bottom_tip_y,
-                        radius: 3.0,
+                        radius: 4.5,
                         color: Color::Gray,
                     });
                     
@@ -520,23 +554,23 @@ impl App {
                     ctx.draw(&ratatui::widgets::canvas::Circle {
                         x: top_tip_x,
                         y: top_tip_y,
-                        radius: 4.0,
+                        radius: 5.5,
                         color: Color::LightBlue,
                     });
                     
-                    // Draw enhanced ball bearing detail at the top connection
+                    // Draw enhanced ball bearing detail at the top connection - larger
                     // Main ball bearing housing
                     ctx.draw(&ratatui::widgets::canvas::Circle {
                         x: top_tip_x,
                         y: top_tip_y,
-                        radius: 5.0,
+                        radius: 7.0,
                         color: Color::White,
                     });
                     // Inner bearing race
                     ctx.draw(&ratatui::widgets::canvas::Circle {
                         x: top_tip_x,
                         y: top_tip_y,
-                        radius: 2.5,
+                        radius: 3.5,
                         color: Color::Gray,
                     });
                 }
