@@ -250,10 +250,10 @@ impl App {
                 let roll_angle = (roll * 20.0) as f64;    // ±20 degrees max tilt
                 let base_lift = (z_movement * 15.0) as f64;  // ±15mm vertical movement
 
-                // Platform dimensions - optimized for clear visualization
+                // Platform dimensions - optimized for clear visualization (more squat design)
                 let platform_radius = 100.0;  
-                let base_height = -50.0;
-                let nominal_height = 40.0 + base_lift;
+                let base_height = -30.0;  // Raised base height for more squat appearance
+                let nominal_height = 15.0 + base_lift;  // Lower nominal height for closer plates
 
                 // Improved isometric projection helper function
                 let to_isometric = |x: f64, y: f64, z: f64| -> (f64, f64) {
@@ -346,8 +346,8 @@ impl App {
                         Color::Yellow      // Neutral
                     };
                     
-                    // Draw realistic X-pattern scissor mechanism
-                    let scissor_width = 15.0;  
+                    // Draw realistic X-pattern scissor mechanism - ensure all struts are visible
+                    let scissor_width = 12.0;  // Slightly reduced for more compact look
                     let mid_height_3d = (base_height + scissor_height_3d) / 2.0;
                     
                     // Calculate X-pattern endpoints in 3D then convert to isometric
@@ -358,9 +358,9 @@ impl App {
                     let (right_top_x, right_top_y) = to_isometric(base_x_3d + x_offset, scissor_height_3d, base_y_3d);
                     let (mid_x, mid_y) = to_isometric(base_x_3d, mid_height_3d, base_y_3d);
                     
-                    // Draw the X-pattern scissor arms with proper thickness
+                    // Draw the X-pattern scissor arms with proper thickness - ensure both diagonals are drawn
                     for thickness in [-1.0, -0.5, 0.0, 0.5, 1.0] {
-                        // Left diagonal of X (from left-base to right-top)
+                        // First diagonal of X (from left-base to right-top)
                         ctx.draw(&ratatui::widgets::canvas::Line {
                             x1: left_base_x + thickness,
                             y1: left_base_y,
@@ -369,13 +369,34 @@ impl App {
                             color: lift_color,
                         });
                         
-                        // Right diagonal of X (from right-base to left-top)
+                        // Second diagonal of X (from right-base to left-top)
                         ctx.draw(&ratatui::widgets::canvas::Line {
                             x1: right_base_x + thickness,
                             y1: right_base_y,
                             x2: left_top_x + thickness,
                             y2: left_top_y,
                             color: lift_color,
+                        });
+                    }
+                    
+                    // Draw vertical support struts for added structural detail
+                    for thickness in [-0.5, 0.0, 0.5] {
+                        // Left vertical strut
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: left_base_x + thickness,
+                            y1: left_base_y,
+                            x2: left_top_x + thickness,
+                            y2: left_top_y,
+                            color: Color::DarkGray,
+                        });
+                        
+                        // Right vertical strut  
+                        ctx.draw(&ratatui::widgets::canvas::Line {
+                            x1: right_base_x + thickness,
+                            y1: right_base_y,
+                            x2: right_top_x + thickness,
+                            y2: right_top_y,
+                            color: Color::DarkGray,
                         });
                     }
                     
@@ -387,18 +408,18 @@ impl App {
                         color: Color::White,
                     });
                     
-                    // Draw stepper motor at base
-                    let (motor_x, motor_y) = to_isometric(base_x_3d, base_height - 8.0, base_y_3d);
+                    // Draw stepper motor at base (adjusted for squat design)
+                    let (motor_x, motor_y) = to_isometric(base_x_3d, base_height - 6.0, base_y_3d);
                     ctx.draw(&ratatui::widgets::canvas::Circle {
                         x: motor_x,
                         y: motor_y,
-                        radius: 6.0,
+                        radius: 5.0,  // Slightly smaller for better proportions
                         color: Color::Blue,
                     });
                     
-                    // Draw mounting brackets
-                    let (bracket_left_x, bracket_left_y) = to_isometric(base_x_3d - 4.0, base_height - 8.0, base_y_3d);
-                    let (bracket_right_x, bracket_right_y) = to_isometric(base_x_3d + 4.0, base_height - 8.0, base_y_3d);
+                    // Draw mounting brackets (adjusted for squat design)
+                    let (bracket_left_x, bracket_left_y) = to_isometric(base_x_3d - 3.0, base_height - 6.0, base_y_3d);
+                    let (bracket_right_x, bracket_right_y) = to_isometric(base_x_3d + 3.0, base_height - 6.0, base_y_3d);
                     ctx.draw(&ratatui::widgets::canvas::Line {
                         x1: bracket_left_x,
                         y1: bracket_left_y,
@@ -513,14 +534,14 @@ impl App {
                     }
                 }
 
-                // Draw center payload mount on upper plate
+                // Draw center payload mount on upper plate (adjusted for squat design)
                 let center_height = avg_height + 
                     (pitch_angle.to_radians() * 0.0) +  // Center doesn't move much for small tilts
                     (roll_angle.to_radians() * 0.0);
                     
                 // Main payload mounting ring
                 let ring_points = 16;
-                let mount_radius = 12.0;
+                let mount_radius = 10.0;  // Slightly smaller for better proportions
                 for i in 0..ring_points {
                     let angle1 = i as f64 * 2.0 * std::f64::consts::PI / ring_points as f64;
                     let angle2 = (i + 1) as f64 * 2.0 * std::f64::consts::PI / ring_points as f64;
@@ -530,8 +551,8 @@ impl App {
                     let x2_3d = mount_radius * angle2.cos();
                     let y2_3d = mount_radius * angle2.sin();
                     
-                    let (x1, y1) = to_isometric(x1_3d, center_height + 3.0, y1_3d);
-                    let (x2, y2) = to_isometric(x2_3d, center_height + 3.0, y2_3d);
+                    let (x1, y1) = to_isometric(x1_3d, center_height + 2.0, y1_3d);  // Reduced height
+                    let (x2, y2) = to_isometric(x2_3d, center_height + 2.0, y2_3d);
                     
                     ctx.draw(&ratatui::widgets::canvas::Line {
                         x1, y1, x2, y2,
@@ -540,7 +561,7 @@ impl App {
                 }
                 
                 // Inner mounting ring
-                let inner_radius = 8.0;
+                let inner_radius = 6.0;  // Proportionally smaller
                 for i in 0..ring_points {
                     let angle1 = i as f64 * 2.0 * std::f64::consts::PI / ring_points as f64;
                     let angle2 = (i + 1) as f64 * 2.0 * std::f64::consts::PI / ring_points as f64;
@@ -550,8 +571,8 @@ impl App {
                     let x2_3d = inner_radius * angle2.cos();
                     let y2_3d = inner_radius * angle2.sin();
                     
-                    let (x1, y1) = to_isometric(x1_3d, center_height + 3.0, y1_3d);
-                    let (x2, y2) = to_isometric(x2_3d, center_height + 3.0, y2_3d);
+                    let (x1, y1) = to_isometric(x1_3d, center_height + 2.0, y1_3d);
+                    let (x2, y2) = to_isometric(x2_3d, center_height + 2.0, y2_3d);
                     
                     ctx.draw(&ratatui::widgets::canvas::Line {
                         x1, y1, x2, y2,
@@ -560,17 +581,17 @@ impl App {
                 }
                 
                 // Draw payload mounting bolt holes (3 bolts at 120° spacing)
-                let bolt_radius = 10.0;
+                let bolt_radius = 8.0;  // Proportionally smaller
                 for i in 0..3 {
                     let angle = i as f64 * 2.0 * std::f64::consts::PI / 3.0; // 120° spacing
                     let x_3d = bolt_radius * angle.cos();
                     let y_3d = bolt_radius * angle.sin();
-                    let (bolt_x, bolt_y) = to_isometric(x_3d, center_height + 3.0, y_3d);
+                    let (bolt_x, bolt_y) = to_isometric(x_3d, center_height + 2.0, y_3d);
                     
                     ctx.draw(&ratatui::widgets::canvas::Circle {
                         x: bolt_x,
                         y: bolt_y,
-                        radius: 2.0,
+                        radius: 1.5,  // Smaller bolt holes
                         color: Color::DarkGray,
                     });
                 }
