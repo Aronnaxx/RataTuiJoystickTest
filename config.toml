@@ -1,0 +1,37 @@
+[gimbal]
+# Maximum tilt angles in degrees
+max_pitch = 20.0
+max_roll = 20.0
+max_lift = 15.0
+
+# Movement sensitivity
+pitch_sensitivity = 1.0
+roll_sensitivity = 1.0
+lift_sensitivity = 1.0
+
+[controls]
+# Keyboard controls
+keyboard_enabled = true
+keyboard_step = 0.1  # Step size for WASD movement
+
+# Joystick/SpaceMouse mappings
+[controls.joystick]
+enabled = true
+pitch_axis = "RightStickY"     # Your ControlMyJoystick mapping
+roll_axis = "RightStickX"      # Your ControlMyJoystick mapping
+lift_axis = "RightZ"           # Z-axis for up/down
+invert_pitch = false
+invert_roll = false
+invert_lift = false
+
+# Alternative axis names to check (for different controllers)
+fallback_axes = [
+    "LeftStickY", "LeftStickX", "LeftZ",
+    "Tz", "Ty", "Tx"
+]
+
+[debug]
+enabled = false
+show_all_axes = true
+show_button_states = true
+log_input_values = false

@@ -1,15 +1,20 @@
+mod config;
+mod gimbal;
+
+use config::Config;
+use gimbal::{GimbalController, InputState};
 use gilrs::{Gilrs, Event, Axis, Button};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, List, ListItem},
     widgets::canvas::Canvas,
     Frame, Terminal,
 };
 use crossterm::{
-    event::{self, Event as CrosstermEvent, KeyCode},
+    event::{self, Event as CrosstermEvent, KeyCode, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -29,26 +34,34 @@ struct GamepadState {
 }
 
 struct App {
+    config: Config,
+    gimbal_controller: GimbalController,
+    input_state: InputState,
     gilrs: Gilrs,
     gamepads: HashMap<gilrs::GamepadId, GamepadState>,
     running: bool,
-    show_all_devices: bool, // Toggle to show all devices including inactive ones
+    debug_mode: bool,
 }
 
 impl App {
     fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        let config = Config::load_or_create("config.toml")?;
+        let gimbal_controller = GimbalController::new(config.clone());
         let gilrs = Gilrs::new().map_err(|e| format!("Failed to initialize gilrs: {}", e))?;
         
         Ok(App {
+            debug_mode: config.debug.enabled,
+            config,
+            gimbal_controller,
+            input_state: InputState::default(),
             gilrs,
             gamepads: HashMap::new(),
             running: true,
-            show_all_devices: false,
         })
     }
 
     fn update(&mut self) {
-        // Process all pending events
+        // Process gamepad events
         while let Some(Event { id, event, .. }) = self.gilrs.next_event() {
             let gamepad_state = self.gamepads.entry(id).or_insert_with(|| GamepadState {
                 name: self.gilrs.gamepad(id).name().to_string(),
@@ -63,12 +76,15 @@ impl App {
             match event {
                 gilrs::EventType::ButtonPressed(button, _) => {
                     gamepad_state.buttons.insert(button, true);
+                    self.input_state.buttons.insert(button, true);
                 },
                 gilrs::EventType::ButtonReleased(button, _) => {
                     gamepad_state.buttons.insert(button, false);
+                    self.input_state.buttons.insert(button, false);
                 },
                 gilrs::EventType::AxisChanged(axis, value, _) => {
                     gamepad_state.axes.insert(axis, value);
+                    self.input_state.axes.insert(axis, value);
                 },
                 gilrs::EventType::Connected => {
                     gamepad_state.connected = true;
@@ -80,9 +96,139 @@ impl App {
                 _ => {}
             }
         }
+
+        // Update gimbal with current input
+        self.gimbal_controller.update(&self.input_state);
+    }
+
+    fn handle_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('q') | KeyCode::Esc => {
+                self.running = false;
+            }
+            KeyCode::Char('t') => {
+                self.debug_mode = !self.debug_mode;
+            }
+            KeyCode::Char('r') => {
+                self.gimbal_controller.reset();
+                self.input_state.keyboard_pitch = 0.0;
+                self.input_state.keyboard_roll = 0.0;
+                self.input_state.keyboard_lift = 0.0;
+            }
+            KeyCode::Char(c) => {
+                self.gimbal_controller.handle_keyboard(&mut self.input_state, c, true);
+            }
+            _ => {}
+        }
     }
 
     fn draw(&self, frame: &mut Frame) {
+        if self.debug_mode {
+            self.draw_debug_view(frame);
+        } else {
+            self.draw_gimbal_view(frame);
+        }
+    }
+
+    fn draw_debug_view(&self, frame: &mut Frame) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),     // Header
+                Constraint::Min(10),       // Debug info
+                Constraint::Min(15),       // Gimbal (smaller)
+            ])
+            .split(frame.area());
+
+        // Header
+        let header = Paragraph::new("🔧 DEBUG MODE - Press 't' to toggle, 'q' to quit, 'r' to reset")
+            .block(Block::default().borders(Borders::ALL))
+            .style(Style::default().fg(Color::Yellow));
+        frame.render_widget(header, chunks[0]);
+
+        // Debug info split
+        let debug_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(50),  // Axes
+                Constraint::Percentage(50),  // Config & State
+            ])
+            .split(chunks[1]);
+
+        self.draw_debug_axes(frame, debug_chunks[0]);
+        self.draw_debug_state(frame, debug_chunks[1]);
+        
+        // Smaller gimbal view
+        self.draw_gimbal_visualization(frame, chunks[2]);
+    }
+
+    fn draw_debug_axes(&self, frame: &mut Frame, area: Rect) {
+        let mut items = vec![
+            ListItem::new(Line::from(Span::styled("=== ACTIVE AXES ===", Style::default().fg(Color::Cyan)))),
+        ];
+
+        // Show all axes with values
+        let mut axes_vec: Vec<_> = self.input_state.axes.iter().collect();
+        axes_vec.sort_by_key(|(axis, _)| format!("{:?}", axis));
+
+        for (axis, &value) in axes_vec {
+            let color = if value.abs() > 0.1 {
+                Color::Green
+            } else if value.abs() > 0.01 {
+                Color::Yellow
+            } else {
+                Color::Gray
+            };
+
+            items.push(ListItem::new(Line::from(Span::styled(
+                format!("{:?}: {:.3}", axis, value),
+                Style::default().fg(color),
+            ))));
+        }
+
+        if self.config.debug.show_button_states && !self.input_state.buttons.is_empty() {
+            items.push(ListItem::new(Line::from(Span::styled("=== BUTTONS ===", Style::default().fg(Color::Cyan)))));
+            for (button, &pressed) in &self.input_state.buttons {
+                if pressed {
+                    items.push(ListItem::new(Line::from(Span::styled(
+                        format!("{:?}: PRESSED", button),
+                        Style::default().fg(Color::Red),
+                    ))));
+                }
+            }
+        }
+
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title("Input Debug"));
+        frame.render_widget(list, area);
+    }
+
+    fn draw_debug_state(&self, frame: &mut Frame, area: Rect) {
+        let state = self.gimbal_controller.get_state();
+        let config = self.gimbal_controller.get_config();
+
+        let items = vec![
+            ListItem::new(Line::from(Span::styled("=== GIMBAL STATE ===", Style::default().fg(Color::Cyan)))),
+            ListItem::new(Line::from(format!("Pitch: {:.1}° (max: ±{:.1}°)", state.pitch, config.gimbal.max_pitch))),
+            ListItem::new(Line::from(format!("Roll:  {:.1}° (max: ±{:.1}°)", state.roll, config.gimbal.max_roll))),
+            ListItem::new(Line::from(format!("Lift:  {:.1}mm (max: ±{:.1}mm)", state.lift, config.gimbal.max_lift))),
+            ListItem::new(Line::from("")),
+            ListItem::new(Line::from(Span::styled("=== CONFIG ===", Style::default().fg(Color::Cyan)))),
+            ListItem::new(Line::from(format!("Pitch Axis: {}", config.controls.joystick.pitch_axis))),
+            ListItem::new(Line::from(format!("Roll Axis:  {}", config.controls.joystick.roll_axis))),
+            ListItem::new(Line::from(format!("Lift Axis:  {}", config.controls.joystick.lift_axis))),
+            ListItem::new(Line::from("")),
+            ListItem::new(Line::from(Span::styled("=== KEYBOARD ===", Style::default().fg(Color::Cyan)))),
+            ListItem::new(Line::from(format!("WASD: Pitch/Roll, RF: Lift"))),
+            ListItem::new(Line::from(format!("Step: {:.3}", config.controls.keyboard_step))),
+        ];
+
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title("State & Config"));
+        frame.render_widget(list, area);
+    }
+
+    fn draw_gimbal_view(&self, frame: &mut Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -91,164 +237,31 @@ impl App {
             ])
             .split(frame.area());
 
-        // Filter to only show active gamepads (with recent activity) unless showing all devices
-        let displayed_gamepads: Vec<_> = if self.show_all_devices {
-            // Show all connected gamepads
-            self.gamepads.iter().filter(|(_, gamepad)| gamepad.connected).collect()
-        } else {
-            // Show only active gamepads
-            self.gamepads.iter()
-                .filter(|(_, gamepad)| {
-                    // Show if connected and has recent activity (within last 30 seconds)
-                    gamepad.connected && 
-                    gamepad.last_activity
-                        .map(|last| last.elapsed() < Duration::from_secs(30))
-                        .unwrap_or(false) &&
-                    // Also check if it has any axis values (indicating it's a real controller)
-                    (!gamepad.axes.is_empty() || !gamepad.buttons.is_empty())
-                })
-                .collect()
-        };
-
-        // Header with enhanced styling
-        let header_text = if displayed_gamepads.is_empty() {
-            if self.show_all_devices {
-                "🎮 Gamepad Visualizer - Press 'q' to quit, 'd' to toggle debug | No gamepads detected"
-            } else {
-                "🎮 Gamepad Visualizer - Press 'q' to quit, 'd' to show all devices | No active gamepads"
-            }
-        } else {
-            if self.show_all_devices {
-                &format!("🎮 Gamepad Visualizer - Press 'q' to quit, 'd' to hide inactive | {} gamepad(s) [DEBUG MODE]", displayed_gamepads.len())
-            } else {
-                &format!("🎮 Gamepad Visualizer - Press 'q' to quit, 'd' to show all devices | {} active gamepad(s)", displayed_gamepads.len())
-            }
-        };
+        // Header
+        let state = self.gimbal_controller.get_state();
+        let header_text = format!(
+            "🎮 EPL Gimbal Controller - Pitch: {:.1}° Roll: {:.1}° Lift: {:.1}mm | 't' debug, 'r' reset, 'q' quit",
+            state.pitch, state.roll, state.lift
+        );
         let header = Paragraph::new(header_text)
             .block(Block::default().borders(Borders::ALL))
             .style(Style::default().fg(Color::Cyan));
         frame.render_widget(header, chunks[0]);
 
-        if displayed_gamepads.is_empty() {
-            let total_connected = self.gamepads.values().filter(|g| g.connected).count();
-            
-            // Create a dormant gamepad state for visualization
-            let dormant_gamepad = GamepadState {
-                name: "No Active Controller - Demo Mode".to_string(),
-                connected: false,
-                axes: HashMap::new(),
-                buttons: HashMap::new(),
-                last_activity: None,
-            };
-            
-            // Show status message in header area
-            let no_gamepad = Paragraph::new(vec![
-                Line::from(Span::styled("🕹️  Demo Mode - No active controllers", Style::default().fg(Color::Yellow))),
-                if total_connected > 0 && !self.show_all_devices {
-                    Line::from(format!("({} HID device(s) connected but inactive - press 'd' to show all)", total_connected))
-                } else if total_connected > 0 {
-                    Line::from(format!("({} device(s) connected)", total_connected))
-                } else {
-                    Line::from("Connect a gamepad or SpaceMouse to control the gimbal")
-                },
-            ])
-                .block(Block::default().borders(Borders::ALL).title("🎯 Status"))
-                .style(Style::default());
-            
-            // Use a smaller area for the status message
-            let demo_chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(5),    // Status message
-                    Constraint::Min(0),       // Gimbal visualization
-                ])
-                .split(chunks[1]);
-                
-            frame.render_widget(no_gamepad, demo_chunks[0]);
-            
-            // Draw the gimbal in demo/dormant state
-            self.draw_gamepad(frame, demo_chunks[1], &dormant_gamepad);
-            return;
-        }
-
-        // Split the main area for multiple displayed gamepads
-        let gamepad_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(vec![Constraint::Min(0); displayed_gamepads.len()])
-            .split(chunks[1]);
-
-        for (i, (_id, gamepad)) in displayed_gamepads.iter().enumerate() {
-            if i >= gamepad_chunks.len() {
-                break;
-            }
-
-            self.draw_gamepad(frame, gamepad_chunks[i], gamepad);
-        }
+        self.draw_gimbal_visualization(frame, chunks[1]);
     }
 
-    fn draw_gamepad(&self, frame: &mut Frame, area: Rect, gamepad: &GamepadState) {
-        let (status_color, status_text, title_suffix) = if gamepad.connected { 
-            (Color::Green, "Connected", "")
-        } else { 
-            (Color::Yellow, "Demo Mode", " - Neutral Position")
-        };
-
-        let main_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),    // Title
-                Constraint::Min(15),      // Main content
-            ])
-            .split(area);
-
-        // Title with gamepad info and activity indicator
-        let activity_indicator = if let Some(last_activity) = gamepad.last_activity {
-            let seconds_ago = last_activity.elapsed().as_secs();
-            if seconds_ago < 5 {
-                "🟢 ACTIVE"
-            } else if seconds_ago < 15 {
-                "🟡 RECENT"
-            } else {
-                "🟠 IDLE"
-            }
-        } else if gamepad.connected {
-            "⚫ INACTIVE"
-        } else {
-            "⚪ DEMO"
-        };
+    fn draw_gimbal_visualization(&self, frame: &mut Frame, area: Rect) {
+        let state = self.gimbal_controller.get_state();
         
-        let title = format!("🎮 {} ({}) {}{} 🎮", gamepad.name, status_text, activity_indicator, title_suffix);
-        let title_widget = Paragraph::new(title)
-            .style(Style::default().fg(status_color))
-            .block(Block::default().borders(Borders::NONE));
-        frame.render_widget(title_widget, main_chunks[0]);
-
-        // Full-screen EPL Gimbal Visualization (Maximum Resolution)
         let gimbal_canvas = Canvas::default()
-            .block(Block::default().borders(Borders::ALL).title("🎯 EPL Parallel Plate Gimbal - Isometric View (3 Scissor Lifts)"))
+            .block(Block::default().borders(Borders::ALL)
+                .title("🎯 EPL Parallel Plate Gimbal - Isometric View (3 Scissor Lifts)"))
             .paint(|ctx| {
-                // Get SpaceMouse/joystick values for gimbal control
-                let pitch = gamepad.axes.get(&Axis::LeftStickY).copied().unwrap_or(0.0);  // Tilt forward/back
-                let roll = gamepad.axes.get(&Axis::LeftStickX).copied().unwrap_or(0.0);   // Tilt left/right
-                
-                // Check for 3D SpaceMouse axes (Z-axis for up/down movement)
-                let z_lift = gamepad.axes.get(&Axis::LeftZ).copied()
-                    .or_else(|| gamepad.axes.get(&Axis::RightZ).copied())
-                    .unwrap_or(0.0);  // Up/down movement
-                
-                // Also check for any Tz axis (translation Z) from SpaceMouse
-                let z_translation = gamepad.axes.iter()
-                    .find(|(axis, _)| format!("{:?}", axis).contains("Tz"))
-                    .map(|(_, &value)| value)
-                    .unwrap_or(0.0);
-                
-                // Use the stronger Z signal
-                let z_movement = if z_translation.abs() > z_lift.abs() { z_translation } else { z_lift };
-
-                // Convert SpaceMouse values to realistic gimbal movement
-                let pitch_angle = (pitch * 20.0) as f64;  // ±20 degrees max tilt
-                let roll_angle = (roll * 20.0) as f64;    // ±20 degrees max tilt
-                let base_lift = (z_movement * 15.0) as f64;  // ±15mm vertical movement
+                // Use the processed gimbal state values instead of raw input
+                let pitch_angle = state.pitch;  // Already processed by gimbal controller
+                let roll_angle = state.roll;    // Already processed by gimbal controller
+                let base_lift = state.lift;     // Already processed by gimbal controller
 
                 // Platform dimensions - optimized for clear visualization (more squat design)
                 let platform_radius = 100.0;  
@@ -317,7 +330,7 @@ impl App {
 
                 let mut upper_plate_points = Vec::new();
 
-                for (angle_deg, radius) in scissor_positions.iter() {
+                for (i, (angle_deg, radius)) in scissor_positions.iter().enumerate() {
                     let angle_rad = angle_deg.to_radians();
                     
                     // 3D position on base platform
@@ -573,6 +586,14 @@ impl App {
                         radius: 3.5,
                         color: Color::Gray,
                     });
+                    
+                    // Label the actuators
+                    let _label = match i {
+                        0 => "A1",
+                        1 => "A2", 
+                        2 => "A3",
+                        _ => "",
+                    };
                 }
 
                 // Draw upper platform (circular plate like the real gimbal)
@@ -869,7 +890,7 @@ impl App {
             })
             .x_bounds([-180.0, 180.0])  // Optimized bounds for better view
             .y_bounds([-100.0, 100.0]);
-        frame.render_widget(gimbal_canvas, main_chunks[1]);
+        frame.render_widget(gimbal_canvas, area);
     }
 }
 
@@ -883,6 +904,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create app
     let mut app = App::new()?;
+    println!("Config loaded. Debug mode: {}", app.debug_mode);
 
     // Main loop
     let tick_rate = Duration::from_millis(16); // ~60 FPS
@@ -895,12 +917,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if crossterm::event::poll(timeout)? {
             if let CrosstermEvent::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => {
-                        app.running = false;
+                match key.kind {
+                    KeyEventKind::Press => {
+                        app.handle_key(key.code);
                     }
-                    KeyCode::Char('d') | KeyCode::Char('D') => {
-                        app.show_all_devices = !app.show_all_devices;
+                    KeyEventKind::Release => {
+                        // Handle key release for WASD movement
+                        if let KeyCode::Char(c) = key.code {
+                            app.gimbal_controller.handle_keyboard(&mut app.input_state, c, false);
+                        }
                     }
                     _ => {}
                 }
